@@ -21,11 +21,11 @@ interface AIContextType {
   setError: (error: string | null) => void;
   generateChatResponse: (props: { // Added for chat
     userMessage: string;
-    history: { role: 'user' | 'assistant'; content: string }[];
+    history: Array<{ role: 'user' | 'assistant'; content: string }>;
     onChunk: (chunk: string) => void;
-    onComplete?: (fullText: string) => void;
   }) => Promise<string>;
 }
+
 
 const AIContext = createContext<AIContextType | undefined>(undefined);
 

@@ -94,7 +94,6 @@ interface GenerateChatResponseProps {
   userMessage: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   onChunk: (chunk: string) => void;
-  onComplete: (fullText: string) => void; // Add this line
 }
 
 interface AdaptCanvasItemProps {
@@ -129,8 +128,7 @@ const useWebLLM = () => {
   const [suggestAIPrompt, setSuggestAIPrompt] = useState<string | null>(null);
   const [requestType, setRequestType] = useState<string | null>(null);
 
-  const [pendingRequests, setPendingRequests] = useState<Record<string, { resolve: (value: any) => void, reject: (reason?: any) => void, onChunk?: (chunk: string) => void, onComplete?: (fullText: string) => void }>>({});
-
+  const [pendingRequests, setPendingRequests] = useState<Record<string, { resolve: (value: any) => void, reject: (reason?: any) => void, onChunk?: (chunk: string) => void}>>({});
   const [isLoadingChatMessage, setIsLoadingChatMessage] = useState(false);
   // ++ IMPROVEMENT: Centralized AI response cleaning function
   const cleanAIResponseString = (rawText: string): string => {
@@ -217,12 +215,11 @@ const useWebLLM = () => {
         case 'chat-complete':
           {
             const { fullResponse, requestId } = payload;
+            console.log();
+            
             const request = pendingRequests[requestId];
             if (request) {
-              if (request.onComplete) {
-                request.onComplete(fullResponse); // Call the callback
-              }
-              request.resolve(fullResponse); 
+              request.resolve(fullResponse); // Resolve the promise with the final text
               setPendingRequests(prev => {
                 const updated = { ...prev };
                 delete updated[requestId];
@@ -442,8 +439,8 @@ const useWebLLM = () => {
       
       // Store the promise handlers and the onChunk callback
       setPendingRequests(prev => ({ 
-        ...prev, 
-        [requestId]: { resolve, reject, onChunk: props.onChunk, onComplete: props.onComplete } // Add onComplete here
+          ...prev, 
+          [requestId]: { resolve, reject, onChunk: props.onChunk }
       }));
       
       // Construct the full message history to send to the worker
