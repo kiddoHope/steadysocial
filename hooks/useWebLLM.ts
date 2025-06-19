@@ -218,6 +218,10 @@ const useWebLLM = () => {
             console.log(fullResponse);
             
             const request = pendingRequests[requestId];
+            console.log(pendingRequests);
+            
+            console.log(request);
+            
             if (request) {
               request.resolve(fullResponse); // Resolve the promise with the final text
               setPendingRequests(prev => {

@@ -62,6 +62,8 @@ export const ChatbotProvider: React.FC<{ children: ReactNode }> = ({ children })
     setWebLLMError(null);
   }, [setWebLLMError]);
 
+ // src/contexts/ChatbotContext.tsx
+
   const sendMessage = async (text: string) => {
     if (!modelLoaded) {
       setChatbotError("AI Model is not ready. Please wait for it to load.");
@@ -84,31 +86,36 @@ export const ChatbotProvider: React.FC<{ children: ReactNode }> = ({ children })
     const assistantPlaceholder: ChatMessage = {
       id: assistantMessageId,
       role: 'assistant',
-      content: '',
+      content: '', // This correctly triggers the typing indicator initially
       timestamp: Date.now()
     };
 
     setMessages(prev => [...prev, userMessage, assistantPlaceholder]);
 
     try {
-      let accumulatedContent = "";
-      await generateChatResponse({
+      // 1. Capture the final, complete string that the promise resolves with.
+      const finalContent = await generateChatResponse({
         userMessage: text,
         history: historyForAI,
         onChunk: (chunk: string) => {
-          accumulatedContent += chunk;
+          // 2. Update the message content during streaming by appending the new chunk
+          //    to the previous state's content. This is a more robust way to handle streaming updates.
           setMessages(prev =>
             prev.map(msg =>
-                msg.id === assistantMessageId ? { ...msg, content: accumulatedContent } : msg
+                msg.id === assistantMessageId ? { ...msg, content: msg.content + chunk } : msg
             )
           );
-          console.log(messages);
-          
         }
       });
+      console.log(finalContent,historyForAI,messages);
+      
+
+      // 3. After the stream is finished, perform one final state update to guarantee
+      //    the message has the exact, complete content from the resolved promise.
+      //    This corrects any potential discrepancies from the streaming.
       setMessages(prev =>
         prev.map(msg =>
-          msg.id === assistantMessageId ? { ...msg, content: accumulatedContent } : msg
+          msg.id === assistantMessageId ? { ...msg, content: finalContent } : msg
         )
       );
 
