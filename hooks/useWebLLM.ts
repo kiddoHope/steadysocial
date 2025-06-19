@@ -215,7 +215,7 @@ const useWebLLM = () => {
         case 'chat-complete':
           {
             const { fullResponse, requestId } = payload;
-            console.log();
+            console.log(fullResponse);
             
             const request = pendingRequests[requestId];
             if (request) {
