@@ -32,7 +32,7 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-500 to-secondary-500 dark:from-primary-800 dark:to-secondary-800 p-4">
+    <div className="min-h-screen flex items-center justify-center dark:from-primary-800 dark:to-secondary-800 p-4">
       <Card className="w-full max-w-md">
         <div className="text-center mb-8">
           <i className="fas fa-feather-alt text-5xl text-primary-500 dark:text-primary-400 mb-2"></i>

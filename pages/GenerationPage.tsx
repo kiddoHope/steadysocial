@@ -384,6 +384,33 @@ const GenerationPage: React.FC = () => {
     setIsPreviewOpen(false);
     setPreviewContent(null);
   };
+
+  const handleRemoveItem = useCallback(async (itemIdToRemove: string) => {
+    if (!activeCanvas) {
+        setSystemNotification({ type: 'error', message: "Cannot remove item: No active canvas." });
+        return;
+    }
+
+    const originalCanvas = activeCanvas; // Keep a copy in case of backend failure
+
+    // Create a new canvas object with the item filtered out
+    const updatedItems = originalCanvas.items.filter(item => item.id !== itemIdToRemove);
+    const updatedCanvas = { ...originalCanvas, items: updatedItems };
+
+    // Optimistically update the UI for a snappy user experience
+    setActiveCanvas(updatedCanvas);
+
+    try {
+        // Persist the change to the backend using your existing service function
+        await updateCanvas(updatedCanvas);
+        setSystemNotification({ type: 'success', message: 'Item removed successfully.' });
+    } catch (error) {
+        console.error("Failed to remove item:", error);
+        setSystemNotification({ type: 'error', message: 'Failed to remove item on the server. Please try again.' });
+        // If the backend update fails, revert the UI to its original state
+        setActiveCanvas(originalCanvas);
+    }
+  }, [activeCanvas]); // This handler depends on the activeCanvas
   
   const platformOptionsForAdaptation = AVAILABLE_PLATFORMS.filter(p => p !== SocialPlatform.General);
 
@@ -477,9 +504,24 @@ const GenerationPage: React.FC = () => {
                           <strong>Original Idea (Tone: {item.baseTone}, Context: {item.basePlatformContext}):</strong><br/>{item.originalText}
                         </p>
                         {/* ++ FIX: Pass the image from the ACTIVE CANVAS, not the page state ++ */}
-                        <Button variant="secondary" size="sm" onClick={() => handleOpenPreview(item.basePlatformContext, item.originalText, activeCanvas.overallImagePreview || null)}>
-                            <i className="fas fa-eye mr-2"></i>Preview
+                        <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                        <Button 
+                          variant="secondary" 
+                          size="sm" 
+                          onClick={() => handleOpenPreview(item.basePlatformContext, item.originalText, activeCanvas.overallImagePreview || null)}
+                          aria-label="Preview item"
+                        >
+                          <i className="fas fa-eye"></i>
                         </Button>
+                        <Button 
+                          variant="danger" // Use a danger variant for visual warning
+                          size="sm" 
+                          onClick={() => handleRemoveItem(item.id)}
+                          aria-label="Remove item"
+                        >
+                          <i className="fas fa-trash-alt"></i>
+                        </Button>
+                      </div>
                       </div>
                       
                       {activeCanvas.overallImagePreview && (

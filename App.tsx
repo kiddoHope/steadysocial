@@ -14,6 +14,10 @@ import Sidebar from './components/layout/Sidebar';
 import ChatbotFAB from './components/chatbot/ChatbotFAB'; // Added
 import ChatWindow from './components/chatbot/ChatWindow'; // Added
 import { useChatbot } from './contexts/ChatbotContext'; // Added
+import TermsPage from './pages/TermsPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import AboutUsPage from './pages/AboutUsPage';
+import AnalyticsPage from './pages/AnalyticsPage';
 // Removed useAI import as it's not directly used for UI changes here now.
 // Global loading state will be handled by components consuming useAI.
 
@@ -73,14 +77,18 @@ const App: React.FC = () => {
       {currentUser && <Sidebar />}
       <div className="flex-1 flex flex-col overflow-hidden">
         {currentUser && <Navbar />}
-        <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 ${!currentUser ? 'h-screen' : ''}`}>
+        <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 ${!currentUser ? 'h-screen' : ''}`}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/privacy" element={<PrivacyPolicyPage />} />
+            <Route path="/about" element={<AboutUsPage />} />
             
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/generate" element={<ProtectedRoute allowedRoles={[UserRole.CREATIVE]}><GenerationPage /></ProtectedRoute>} />
+              <Route path="/analytics" element={<AnalyticsPage />} /> {/* Added Analytics Route */}
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/hr" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><HumanResourcePage /></ProtectedRoute>} />
             </Route>

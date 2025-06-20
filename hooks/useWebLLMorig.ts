@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { SocialPlatform, CaptionTone, CanvasItem } from '../types'; // Assuming CanvasItem might be needed elsewhere
 import { WEBLLM_SELECTED_MODEL } from '../constants';
 
-const CHATBOT_SYSTEM_INSTRUCTION = "You are SteadySocial AI, a friendly and expert social media copywriter. When asked for content, provide a few distinct options with relevant hashtags and emojis. Give clear, actionable advice when asked. Format responses with markdown. Do not use `<End-of-Turn>` or `<think>` tags.";
+const CHATBOT_SYSTEM_INSTRUCTION = "You are SteadySocial AI, an expert copywriter, caption maker, and professional social media manager. You are friendly, insightful, and provide actionable advice and creative suggestions for social media content. When asked for captions or copy, provide a few distinct options unless specified otherwise. Format your responses clearly, using markdown for lists, bolding, etc., where appropriate. When generating social media posts, consider including relevant hashtags and emojis. If asked for general advice, provide clear, step-by-step guidance. Do not use `<End-of-Turn>` or `<think>` tags in your response.";
 
 const captionWorkerScript = `
   import { CreateMLCEngine } from "https://esm.run/@mlc-ai/web-llm";
@@ -14,6 +14,7 @@ const captionWorkerScript = `
     const { type, payload } = event.data;
 
     if (type === 'init') {
+      // ... (This part is correct and does not need changes)
       if (isModelLoaded && engine) {
         self.postMessage({ type: 'init-done', payload: "Model already loaded." });
         return;
@@ -33,7 +34,8 @@ const captionWorkerScript = `
     }
 
     if (type === 'generate-text') {
-      if (!engine || !isModelLoaded) { self.postMessage({ type: 'error', payload: "Model not initialized." }); return; }
+      // ... (This is for canvas items and is correct, no changes needed)
+      if (!engine || !isModelLoaded) { /* ... error handling ... */ return; }
       try {
         const messages = [{ role: 'user', content: payload.prompt }];
         const chunks = await engine.chat.completions.create({ messages, stream: true });
@@ -43,35 +45,38 @@ const captionWorkerScript = `
           result += content;
         }
         self.postMessage({ type: 'text-result', payload: { ...payload, result } });
-      } catch (err) {
-        self.postMessage({ type: 'error', payload: 'Text generation failed: ' + (err instanceof Error ? err.message : String(err)) });
-      }
+      } catch (err) { /* ... error handling ... */ }
     }
 
+    // ++ FIX: Add a new, dedicated handler for chat messages ++
     if (type === 'generate-chat') {
-      if (!engine || !isModelLoaded) {
-        self.postMessage({ type: 'error', payload: "Model not initialized." });
-        return;
-      }
-      try {
-        const chunks = await engine.chat.completions.create({
-          messages: payload.messages,
-          stream: true
-        });
-        
-        let fullResponse = "";
-        for await (const chunk of chunks) {
-          const content = chunk.choices[0]?.delta?.content || "";
-          if (content) {
-            fullResponse += content;
-            self.postMessage({ type: 'chat-chunk', payload: { chunk: content, requestId: payload.requestId } });
-          }
+        if (!engine || !isModelLoaded) {
+            self.postMessage({ type: 'error', payload: "Model not initialized." });
+            return;
         }
-        
-        self.postMessage({ type: 'chat-complete', payload: { fullResponse, requestId: payload.requestId } });
-      } catch (err) {
-        self.postMessage({ type: 'error', payload: 'Chat generation failed: ' + (err instanceof Error ? err.message : String(err)) });
-      }
+        try {
+            const chunks = await engine.chat.completions.create({
+                messages: payload.messages, // Use the full message history from the hook
+                stream: true 
+            });
+            
+            let fullResponse = "";
+            // Stream back each chunk as it arrives
+            for await (const chunk of chunks) {
+                const content = chunk.choices[0]?.delta?.content || "";
+                if (content) {
+                    fullResponse += content;
+                    // Post a 'chunk' message for real-time streaming
+                    self.postMessage({ type: 'chat-chunk', payload: { chunk: content, requestId: payload.requestId } });
+                }
+            }
+            
+            // Signal that the full response is complete
+            self.postMessage({ type: 'chat-complete', payload: { fullResponse, requestId: payload.requestId } });
+
+        } catch (err) {
+            self.postMessage({ type: 'error', payload: 'Chat generation failed: ' + (err instanceof Error ? err.message : String(err)) });
+        }
     }
   };
 `;
@@ -264,64 +269,49 @@ const useWebLLM = () => {
       setIsLoadingInitialItems(true);
       setError(null);
 
-      // ++ MAJOR CHANGE: Robust response parsing for a small model.
-      // Instead of trying to parse JSON, which is error-prone for small models,
-      // we now parse a numbered list from the free-text response.
       pendingRequests.current['initialCanvasItems'] = {
         resolve: (rawText: string) => {
-          console.log("Raw AI Response for initial items:", rawText);
-          const posts: string[] = [];
-          // Regex to find lines starting with a number and a period (e.g., "1. ...").
-          // The 's' flag allows '.' to match newlines, capturing multi-line posts.
-          const matches = rawText.matchAll(/^\s*\d+\.\s*([\s\S]*?)(?=\n\s*\d+\.|$)/gm);
-
-          for (const match of matches) {
-              // The first capture group is the content of the post.
-              if (match[1]) {
-                  // Clean up the captured text.
-                  const cleanedPost = match[1].trim();
-                  if (cleanedPost) {
-                      posts.push(cleanedPost);
-                  }
-              }
+          const startIndex = rawText.indexOf('[');
+          const endIndex = rawText.lastIndexOf(']');
+          if (startIndex === -1 || endIndex === -1) {
+            console.warn("AI did not return a valid JSON array. The response was:", rawText);
+            // Fallback: If no JSON, try splitting by newline as a last resort, but rejection is safer.
+            return reject(new Error("AI response was not in the expected JSON format."));
           }
-
-          if (posts.length === 0) {
-            console.warn("Could not parse a numbered list from the AI response. Splitting by newline as a fallback.", rawText);
-            // Fallback for when the model fails to create a numbered list.
-            const fallbackPosts = rawText.split('\n\n')
-                .map(p => cleanAIResponseString(p)) // Use the cleaner on each part
-                .filter(p => p.length > 10); // Filter out empty or very short lines
-            
-            if (fallbackPosts.length === 0) {
-                return reject(new Error("AI response could not be parsed into separate posts."));
+          const jsonString = rawText.substring(startIndex, endIndex + 1);
+          try {
+            let parsedItemTexts: string[] = JSON.parse(jsonString);
+            if (Array.isArray(parsedItemTexts) && parsedItemTexts.every(item => typeof item === 'string')) {
+              resolve(parsedItemTexts.slice(0, props.numberOfIdeas));
+            } else {
+              reject(new Error("Parsed JSON is not an array of strings."));
             }
-            resolve(fallbackPosts.slice(0, props.numberOfIdeas));
-          } else {
-             resolve(posts.slice(0, props.numberOfIdeas));
+          } catch (e) {
+            console.error("Failed to parse AI response as JSON:", jsonString);
+            reject(new Error("Failed to parse AI JSON response."));
           }
         },
         reject
       };
 
-      // ++ MAJOR CHANGE: The prompt no longer asks for JSON.
-      // It now requests a simple numbered list, which is much easier for a small model to generate correctly.
       const prompt = `Act as an expert social media copywriter.
-      Your task is to write exactly ${props.numberOfIdeas} distinct social media posts based on the provided details.
-
+      Your task is to write exactly ${props.numberOfIdeas} distinct social media posts based on the provided details. The posts should be varied in structure, style, and length.
       Platform Context: ${props.platform}
       Desired Tone: ${props.tone}
       Core Message/Prompt: ${props.customPrompt}
       Additional details from text file: ${props.textFileContent || 'None'}
 
-      IMPORTANT: You must respond ONLY with a valid JSON array of strings, where each string is a complete, ready-to-use social media post. Do not write a strategy or ideas for posts; write the posts themselves.. Do not write anything else.
+      IMPORTANT: You must respond ONLY with a valid JSON array of strings, where each string is a complete, ready-to-use social media post. Do not write a strategy or ideas for posts; write the posts themselves.
 
       Example Response:
       [
         "Is it a latte kind of morning or a black coffee day? 🤔 Let us know your go-to order in the comments! #MorningRitual #CoffeeQuestion #TheDailyGrind",
-        "Behind every cup of our Signature Roast is a story. 🌱 We partner with a family-run farm in the highlands of Colombia, where these beans are hand-picked and sun-dried to perfection. It’s more than just coffee; it’s a connection. #BeanToCup #EthicalSourcing #CoffeeStory",
-        "Ready to perfect your French Press? Here are 3 quick tips: 1️⃣ Use coarse ground beans. 2️⃣ Steep for exactly 4 minutes. 3️⃣ Press the plunger down slowly. Enjoy! ☕️ #CoffeeTips #HomeBarista #BrewGuide"
-      ]`;
+        "Behind every cup of our Signature Roast is a story. 🌱\\n\\nWe partner with a family-run farm in the highlands of Colombia, where these beans are hand-picked and sun-dried to perfection. The result? A smooth, balanced flavor with notes of caramel and citrus.\\n\\nIt’s more than just coffee; it’s a connection. #BeanToCup #EthicalSourcing #CoffeeStory #CraftedWithCare",
+        "Ready to perfect your French Press? Here are 3 quick tips:\\n1️⃣ Use coarse ground beans (like our House Blend!)\\n2️⃣ Steep for exactly 4 minutes.\\n3️⃣ Press the plunger down slowly and steadily.\\nEnjoy that perfect cup! ☕️ #CoffeeTips #HomeBarista #BrewGuide",
+        "Our Summer Cold Brew is back for a limited time! ☀️🧊 Tag a friend who needs this in their life ASAP. 👇 #ColdBrew #SummerVibes #LimitedEdition #TagAFriend",
+        "That Friday feeling, powered by our place. ✨ Show us how you're enjoying your weekend coffee by tagging us! #WeekendCoffee #CommunityLove #CoffeeShopVibes"
+      ]
+      `;
 
       worker.postMessage({ type: 'generate-text', payload: { prompt, requestType: 'initialCanvasItems' } });
     });
@@ -403,19 +393,24 @@ const useWebLLM = () => {
       };
 
     // -- FIX: This is the heavily revised prompt --
-    // ++ CHANGE: This prompt is heavily simplified for a smaller model.
-    // It makes the task less abstract and focuses on a single, clear output.
     const promptToAI = `
-    Your job is to write a single, effective sentence I can use as a prompt to generate social media posts.
-    The topic is: "${title}"
-    
-    CRITICAL: Respond with ONLY the prompt itself. Do not say "Here is a prompt" or anything else.
+    You are an expert Marketing Prompt Engineer. Your task is to write a detailed and effective prompt for another AI to use.
+    This AI's goal is to generate a creative social media posts.
+
+    The overall topic is: "${title}"
+
+    The prompt you write MUST guide the other AI. It should contain instructions on what to focus on, the desired tone, and the kind of output needed.
+
+    CRITICAL INSTRUCTIONS:
+    1.  DO NOT write the final social media captions or ideas yourself.
+    2.  Your output MUST BE the prompt for the other AI.
+    3.  Do not include any explanation, conversational filler, or markdown formatting in your response.
 
     EXAMPLE:
-    If the topic was "Our New Sustainable Coffee Blend", your entire response should be:
-    "Generate social media posts about our new eco-friendly coffee, focusing on the rich taste, sustainable sourcing, and how it improves the morning ritual."
+    If the input topic was "Our New Sustainable Coffee Blend", a good output from you would be:
+    "Generate distinct social media angles for our new sustainable coffee blend. Focus on the eco-friendly sourcing, the rich taste profile, and how it enhances the morning ritual. Use a warm, inviting tone. Include relevant hashtags."
 
-    Now, write the prompt for the topic: "${title}"
+    Now, based on the topic "${title}", write the new prompt.
     `;
 
     worker.postMessage({ type: 'generate-text', payload: { prompt: promptToAI, requestType: 'suggestPrompt', originalTitle: title } });

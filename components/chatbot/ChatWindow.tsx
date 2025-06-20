@@ -15,8 +15,6 @@ const ChatWindow: React.FC = () => {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
-
-  console.log(messages);
   
   useEffect(scrollToBottom, [messages]);
   
@@ -60,6 +58,7 @@ const ChatWindow: React.FC = () => {
             isLastMessage={index === messages.length - 1} // Pass the isLastMessage prop
           />
         ))}
+        <div ref={messagesEndRef} />
       </div>
 
       {error && (

@@ -107,7 +107,6 @@ export const ChatbotProvider: React.FC<{ children: ReactNode }> = ({ children })
           );
         }
       });
-      console.log(finalContent,historyForAI,messages);
       
 
       // 3. After the stream is finished, perform one final state update to guarantee
