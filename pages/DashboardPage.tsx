@@ -112,11 +112,13 @@ const CanvasDisplayCard: React.FC<{
            )}
             
             {/* View/Edit button */}
-            <a href={`#/generate?canvasId=${canvas.id}`} className="block mt-2">
-              <Button variant="secondary" size="sm" className="w-full">
-                {canvas.status === CanvasStatus.DRAFT || (canvas.createdBy === currentUserId && canvas.status === CanvasStatus.NEEDS_REVISION) ? "Edit Canvas" : "View Canvas Details"}
-              </Button>
-            </a>
+            {!isAdmin && (
+              <a href={`#/generate?canvasId=${canvas.id}`} className="block mt-2">
+                <Button variant="secondary" size="sm" className="w-full">
+                  {canvas.status === CanvasStatus.DRAFT || (canvas.createdBy === currentUserId && canvas.status === CanvasStatus.NEEDS_REVISION) ? "Edit Canvas" : "View Canvas Details"}
+                </Button>
+              </a>
+            )}
         </div>
       </div>
     </Card>

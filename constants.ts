@@ -26,9 +26,9 @@ export const AVAILABLE_TONES: CaptionTone[] = [
 
 // Using a Llama3 model, which is generally better for creative generation
 // export const WEBLLM_SELECTED_MODEL = "Llama-3-8B-Instruct-q4f16_1-MLC"; // Example if changing
-// export const WEBLLM_SELECTED_MODEL = "Mistral-7B-Instruct-v0.3-q4f32_1-MLC"; // Example if changing
+export const WEBLLM_SELECTED_MODEL = "Mistral-7B-Instruct-v0.3-q4f32_1-MLC"; // Example if changing
 // export const WEBLLM_SELECTED_MODEL = "DeepSeek-R1-Distill-Qwen-7B-q4f32_1-MLC"; // Model ID for WebLLM
 // export const WEBLLM_SELECTED_MODEL = "Qwen3-8B-q4f32_1-MLC"; // Keeping user's current model
 // export const WEBLLM_SELECTED_MODEL = "Phi-3.5-mini-instruct-q4f32_1-MLC"; // Keeping user's current model
-export const WEBLLM_SELECTED_MODEL = "SmolLM2-1.7B-Instruct-q4f16_1-MLC"; // Keeping user's current model
+// export const WEBLLM_SELECTED_MODEL = "SmolLM2-1.7B-Instruct-q4f16_1-MLC"; // Keeping user's current model
 // export const WEBLLM_SELECTED_MODEL = "SmolLM2-360M-Instruct-q0f16-MLC"; // Keeping user's current model

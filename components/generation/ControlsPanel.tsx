@@ -31,6 +31,7 @@ interface ControlsPanelProps {
 
   onSuggestPrompt: () => void; 
   isSuggestingPrompt: boolean; 
+  controlsGloballyDisabled: boolean;
 }
 
 const ControlsPanel: React.FC<ControlsPanelProps> = ({
