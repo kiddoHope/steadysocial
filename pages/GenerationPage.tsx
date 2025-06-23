@@ -3,7 +3,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { SocialPlatform, CaptionTone, CanvasStatus, InitialIdea, ContentCanvas, CanvasItem } from '../types';
+import { SocialPlatform, CaptionTone, CanvasStatus, ContentCanvas, CanvasItem } from '../types'; // Removed InitialIdea
 import { AVAILABLE_PLATFORMS, AVAILABLE_TONES } from '../constants';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -21,7 +21,6 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
-// Select import was removed as it's not directly used in the modified parts of this file. It's used within ControlsPanel.
 
 interface PreviewModalProps {
   isOpen: boolean;
@@ -110,14 +109,14 @@ const SocialPostPreview: React.FC<SocialPostPreviewProps> = ({
 
 const GenerationPage: React.FC = () => {
   const {
-    modelLoaded,
-    modelProgress,
+    creativeModelLoaded, // Changed from modelLoaded
+    // creativeModelProgress, // Available if needed for more granular loading display on this page
     isLoadingInitialItems,
     isLoadingAdaptation,
     isLoadingPromptSuggestion,
     error: webLLMError,
-    rawAIResponse, // Still useful for debugging or showing non-item AI responses
-    requestType, // Now available from context
+    rawAIResponse, 
+    requestType, 
     generateInitialCanvasItems,
     adaptCanvasItem,
     suggestPromptForCanvasTitle,
@@ -159,9 +158,7 @@ const GenerationPage: React.FC = () => {
     setOverallTextFile(null);
     setOverallTextFileContent(null);
     setParsedRawItems(null);
-    // Do not clear rawAIResponse or webLLMError here as they might be relevant from a previous failed load
     setNumberOfIdeas(3);
-    // setSystemNotification(null); // Usually cleared before new action
   }, []);
 
 
@@ -173,7 +170,7 @@ const GenerationPage: React.FC = () => {
       setIsPageLoadingCanvas(true);
       setSystemNotification(null);
       setWebLLMError(null);
-      resetPageToFreshState(); // Reset before loading new
+      resetPageToFreshState(); 
 
       const canvas = await getCanvasById(id);
       if (canvas) {
@@ -196,11 +193,10 @@ const GenerationPage: React.FC = () => {
     };
 
     if (canvasIdFromUrl) {
-      if (!activeCanvas || activeCanvas.id !== canvasIdFromUrl || isPageLoadingCanvas) { // Check isPageLoadingCanvas to prevent re-trigger during load
-         if(!isPageLoadingCanvas) loadCanvas(canvasIdFromUrl); // Only call if not already loading
+      if (!activeCanvas || activeCanvas.id !== canvasIdFromUrl || isPageLoadingCanvas) {
+         if(!isPageLoadingCanvas) loadCanvas(canvasIdFromUrl);
       }
     } else {
-      // No canvasId in URL. If there's an active canvas, it means user navigated away or cleared. Reset.
       if (activeCanvas) {
         resetPageToFreshState();
       }
@@ -217,10 +213,8 @@ const GenerationPage: React.FC = () => {
   
   const handleStartOver = useCallback((shouldNavigate = true) => {
     resetPageToFreshState();
-    setSystemNotification(null); // Clear all notifications
-    setWebLLMError(null); // Clear errors
-    // Clear AI debug outputs explicitly if starting over
-    // setRawAIResponse(null); // Decided to keep rawAIResponse for debugging continuity
+    setSystemNotification(null);
+    setWebLLMError(null);
     if (shouldNavigate) {
       navigate('/generate', { replace: true });
     }
@@ -232,21 +226,28 @@ const GenerationPage: React.FC = () => {
     if (!customPrompt.trim()) { setSystemNotification({ type: 'error', message: "A prompt is required to generate ideas." }); return; }
     
     setSystemNotification(null);
-    setParsedRawItems(null); // Clear previous raw items before generating new ones
+    setParsedRawItems(null);
 
     try {
       const generatedTextsArray = await generateInitialCanvasItems({
         customPrompt, textFileContent: overallTextFileContent, platform: platformContext, tone, numberOfIdeas
       });
+      console.log('Generated Texts Array:', generatedTextsArray);
       setParsedRawItems(generatedTextsArray);
       if (generatedTextsArray.length === 0) {
         setSystemNotification({ type: 'info', message: "AI generated a response, but no distinct items could be parsed. Check raw output or try a different prompt." });
       } else {
         setSystemNotification({ type: 'success', message: `${generatedTextsArray.length} new ideas generated. Add them as cards to your canvas.` });
       }
-    } catch (err: any) {
-      setWebLLMError(err.message || "An unknown error occurred during idea generation.");
-      setParsedRawItems(null); // Ensure parsed items are cleared on error
+    } catch (err: unknown) {
+      let errorMessage = "An unknown error occurred during idea generation.";
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      }
+      setWebLLMError(errorMessage);
+      setParsedRawItems(null);
     }
   }, [currentUser, generateInitialCanvasItems, customPrompt, overallTextFileContent, platformContext, tone, numberOfIdeas, setWebLLMError, setParsedRawItems, setSystemNotification]);
 
@@ -258,8 +259,8 @@ const GenerationPage: React.FC = () => {
         id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         originalText: itemText,
         adaptations: {},
-        baseTone: tone, // Use current overall tone for the new item
-        basePlatformContext: platformContext, // Use current overall platform for the new item
+        baseTone: tone,
+        basePlatformContext: platformContext,
     };
 
     const currentCanvasTitle = canvasTitle.trim() || (activeCanvas?.title) || `Canvas - ${new Date().toLocaleDateString()}`;
@@ -284,24 +285,23 @@ const GenerationPage: React.FC = () => {
         const updated = await updateCanvas(finalCanvas);
         if (!updated) { 
           setSystemNotification({ type: 'error', message: 'Failed to update canvas.'}); 
-          return; /* Stay on current state */ 
+          return;
         }
         finalCanvas = updated;
     } else {
         const newCanvasData = {
             ...canvasUpdatesFromControls,
             createdBy: currentUser.id,
-            status: CanvasStatus.DRAFT, // Explicitly set status for new canvas
-            createdAt: Date.now(), // Explicitly set createdAt
+            status: CanvasStatus.DRAFT,
+            createdAt: Date.now(),
         };
         finalCanvas = await createCanvasService(
-          newCanvasData as Omit<ContentCanvas, 'id' | 'items'>, // Type assertion for service
+          newCanvasData as Omit<ContentCanvas, 'id' | 'items'>, 
            [newItem]
         );
     }
     
     setActiveCanvas(finalCanvas);
-    // Remove the added item from parsedRawItems display if it was from there
     setParsedRawItems(prevItems => prevItems ? prevItems.filter(raw => raw !== itemText) : null);
     setSystemNotification({ type: 'success', message: `Item added to canvas "${finalCanvas.title}".` });
 
@@ -340,7 +340,15 @@ const GenerationPage: React.FC = () => {
       });
       const updatedCanvas = await addOrUpdateCanvasItemAdaptation(activeCanvas.id, item.id, targetPlatform, adaptedText);
       if (updatedCanvas) setActiveCanvas(updatedCanvas);
-    } catch (err: any) { setSystemNotification({ type: 'error', message: `Failed to adapt item: ${err.message}` }); }
+    } catch (err: unknown) { 
+      let errorMessage = `Failed to adapt item.`;
+      if (err instanceof Error) {
+        errorMessage = `Failed to adapt item: ${err.message}`;
+      } else if (typeof err === 'string' && err.length > 0) {
+        errorMessage = `Failed to adapt item: ${err}`;
+      }
+      setSystemNotification({ type: 'error', message: errorMessage }); 
+    }
   }, [currentUser, activeCanvas, adaptCanvasItem, setActiveCanvas, setSystemNotification]);
 
   const handleItemNotesChange = useCallback(async (itemId: string, notes: string) => {
@@ -381,23 +389,23 @@ const GenerationPage: React.FC = () => {
       const suggestedPromptText = await suggestPromptForCanvasTitle(canvasTitle);
       setCustomPrompt(suggestedPromptText);
       setSystemNotification({ type: 'success', message: "AI prompt suggestion applied!" });
-    } catch (err: any) {
-      // Robustly extract error message string
-      let messageString: string;
-      const messageValue = err?.message;
-
-      if (typeof messageValue === 'string') {
-        messageString = messageValue;
-      } else if (messageValue !== undefined && messageValue !== null) {
-        messageString = String(messageValue); // Convert to string if it's not already (e.g. if it's an object)
-      } else {
-        messageString = ""; // Default to empty if messageValue is null or undefined
-      }
-      
-      const finalMessage = messageString || "Failed to get prompt suggestion.";
-
-      setWebLLMError(finalMessage);
-      setSystemNotification({ type: 'error', message: finalMessage });
+    } catch (errorCaught: unknown) {
+        let messageString: string;
+        if (errorCaught instanceof Error) {
+            messageString = errorCaught.message;
+        } else if (typeof errorCaught === 'string') {
+            messageString = errorCaught;
+        } else if (errorCaught && typeof (errorCaught as any).message === 'string') {
+            messageString = (errorCaught as any).message;
+        } else if (errorCaught && typeof (errorCaught as any).text === 'string') { // Check for .text as a fallback
+            messageString = (errorCaught as any).text;
+        }
+         else {
+            messageString = "An unexpected error occurred while suggesting a prompt.";
+        }
+        const finalMessage = messageString || "Failed to get prompt suggestion.";
+        setWebLLMError(finalMessage);
+        setSystemNotification({ type: 'error', message: finalMessage });
     }
   }, [canvasTitle, suggestPromptForCanvasTitle, setCustomPrompt, setWebLLMError, setSystemNotification]);
 
@@ -412,32 +420,30 @@ const GenerationPage: React.FC = () => {
     const originalCanvas = { ...activeCanvas };
     const updatedItems = originalCanvas.items.filter(item => item.id !== itemIdToRemove);
     const updatedCanvasData = { ...originalCanvas, items: updatedItems };
-    setActiveCanvas(updatedCanvasData); // Optimistic update
+    setActiveCanvas(updatedCanvasData);
     try {
         await updateCanvas(updatedCanvasData);
         setSystemNotification({ type: 'success', message: 'Item removed successfully.' });
     } catch (error) {
-        setActiveCanvas(originalCanvas); // Revert on error
+        setActiveCanvas(originalCanvas);
         setSystemNotification({ type: 'error', message: 'Failed to remove item. Please try again.' });
     }
   }, [activeCanvas, setActiveCanvas, setSystemNotification]);
   
   const platformOptionsForAdaptation = AVAILABLE_PLATFORMS.filter(p => p !== SocialPlatform.General);
 
-  // Determine if main controls panel should be disabled
   const controlsGloballyDisabled =
     isPageLoadingCanvas ||
-    !modelLoaded ||
+    !creativeModelLoaded || // Changed from !modelLoaded
     (!!activeCanvas &&
       (activeCanvas.status === CanvasStatus.PENDING_REVIEW ||
         activeCanvas.status === CanvasStatus.APPROVED ||
         (activeCanvas.status === CanvasStatus.NEEDS_REVISION && currentUser?.id !== activeCanvas.createdBy)));
 
-  // Determine if item-level editing (adapt, notes) should be disabled
   const itemEditingDisabled = 
-    controlsGloballyDisabled || // If main controls are off, item controls are too
-    isLoadingInitialItems || // Disable item edits while new base ideas are generating
-    Object.values(isLoadingAdaptation).some(pL => Object.values(pL).some(s => s)) || // Disable if any adaptation is in progress
+    controlsGloballyDisabled ||
+    isLoadingInitialItems || 
+    Object.values(isLoadingAdaptation).some(pL => Object.values(pL).some(s => s)) || 
     (!!activeCanvas && 
       activeCanvas.status !== CanvasStatus.DRAFT &&
       !(activeCanvas.status === CanvasStatus.NEEDS_REVISION && currentUser?.id === activeCanvas.createdBy)
@@ -466,7 +472,7 @@ const GenerationPage: React.FC = () => {
       {webLLMError && <Alert type="error" message={webLLMError} onClose={() => setWebLLMError(null)} />}
       {systemNotification && <Alert type={systemNotification.type} message={systemNotification.message} onClose={() => setSystemNotification(null)} />}
       
-      {modelLoaded && (!activeCanvas || (activeCanvas && activeCanvas.status === CanvasStatus.DRAFT || (activeCanvas.status === CanvasStatus.NEEDS_REVISION && currentUser?.id === activeCanvas.createdBy))) && (
+      {creativeModelLoaded && (!activeCanvas || (activeCanvas && activeCanvas.status === CanvasStatus.DRAFT || (activeCanvas.status === CanvasStatus.NEEDS_REVISION && currentUser?.id === activeCanvas.createdBy))) && (
          <Card title="AI Generated Ideas" className="mb-6">
            <div ref={rawOutputRef} className="text-sm text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 p-4 rounded-md overflow-auto max-h-72 min-h-[5rem]" aria-live="polite">
              {isLoadingInitialItems ? (
@@ -498,7 +504,7 @@ const GenerationPage: React.FC = () => {
                 </p>
              )}
            </div>
-           {rawAIResponse && (parsedRawItems === null || parsedRawItems.length === 0) && requestType !== 'chatMessage' && (
+           {rawAIResponse && (parsedRawItems === null || parsedRawItems.length === 0) && requestType !== 'chatMessage' && requestType?.startsWith('initial') && (
              <details className="mt-2 text-xs">
                <summary className="cursor-pointer text-slate-500 dark:text-slate-400 hover:underline">View Raw AI Output</summary>
                <pre className="mt-1 p-2 bg-slate-200 dark:bg-slate-700 rounded text-xs whitespace-pre-wrap max-h-40 overflow-auto">{String(rawAIResponse)}</pre>
@@ -527,7 +533,7 @@ const GenerationPage: React.FC = () => {
             onNumberOfIdeasChange={setNumberOfIdeas}
             onGenerateIdeas={handleGenerateIdeas}
             isGenerating={isLoadingInitialItems} 
-            isModelReady={modelLoaded}
+            isModelReady={creativeModelLoaded} // Changed from modelLoaded
             canvasTitle={canvasTitle}
             onCanvasTitleChange={setCanvasTitle}
             onSuggestPrompt={handleSuggestPrompt}
@@ -536,7 +542,7 @@ const GenerationPage: React.FC = () => {
           />
         </div>
         <div className="lg:col-span-8">
-            {!activeCanvas && modelLoaded && !isLoadingInitialItems && !isPageLoadingCanvas && (
+            {!activeCanvas && creativeModelLoaded && !isLoadingInitialItems && !isPageLoadingCanvas && (
               <Card className="h-96 flex justify-center items-center">
                 <div className="text-center">
                   <i className="fas fa-edit text-6xl text-primary-400 mb-6"></i>

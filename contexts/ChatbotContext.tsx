@@ -30,7 +30,7 @@ export const ChatbotProvider: React.FC<{ children: ReactNode }> = ({ children })
     isLoadingChatMessage: isWebLLMLoadingChat,
     error: webLLMError,
     setError: setWebLLMError,
-    modelLoaded
+    chatbotModelLoaded
   } = useAI();
 
   useEffect(() => {
@@ -65,7 +65,7 @@ export const ChatbotProvider: React.FC<{ children: ReactNode }> = ({ children })
  // src/contexts/ChatbotContext.tsx
 
   const sendMessage = async (text: string) => {
-    if (!modelLoaded) {
+    if (!chatbotModelLoaded) {
       setChatbotError("AI Model is not ready. Please wait for it to load.");
       return;
     }

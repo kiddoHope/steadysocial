@@ -1,6 +1,7 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { SocialPlatform, CaptionTone, CanvasItem } from '../types'; // Assuming CanvasItem might be needed elsewhere
-import { WEBLLM_SELECTED_MODEL } from '../constants';
+import { SocialPlatform, CaptionTone } from '../types'; 
+import { WEBLLM_CREATIVE_MODEL, WEBLLM_CHATBOT_MODEL } from '../constants';
 
 const CHATBOT_SYSTEM_INSTRUCTION = "You are SteadySocial AI, a friendly and expert social media copywriter. When asked for content, provide a few distinct options with relevant hashtags and emojis. Give clear, actionable advice when asked. Format responses with markdown. Do not use `<End-of-Turn>` or `<think>` tags.";
 
@@ -9,31 +10,45 @@ const captionWorkerScript = `
 
   let engine = null;
   let isModelLoaded = false;
+  let currentModelName = '';
 
   self.onmessage = async (event) => {
     const { type, payload } = event.data;
 
     if (type === 'init') {
-      if (isModelLoaded && engine) {
-        self.postMessage({ type: 'init-done', payload: "Model already loaded." });
-        return;
+      // If a different model is requested, or no model is loaded, initialize.
+      if ((isModelLoaded && engine && currentModelName !== payload.model) || !isModelLoaded) {
+        if (engine) {
+          // If there's an old engine, unload it first.
+          // This assumes CreateMLCEngine might not handle re-init well without explicit unload.
+          // Depending on WebLLM's internal handling, this might be overly cautious or necessary.
+          // For simplicity, we're assuming CreateMLCEngine can be called again to switch models,
+          // or that for separate workers, this re-initialization logic per worker is fine.
+          // await engine.unload(); // engine.unload() may not exist or work this way.
+          // isModelLoaded = false;
+        }
+      } else if (isModelLoaded && engine && currentModelName === payload.model) {
+         self.postMessage({ type: 'init-done', payload: { model: currentModelName, message: "Model already loaded." } });
+         return;
       }
+      
+      currentModelName = payload.model; // Store the model name being initialized
       try {
         const appConfig = { useIndexedDBCache: true };
         engine = await CreateMLCEngine(payload.model, {
           initProgressCallback: (progress) => {
-            self.postMessage({ type: 'progress', payload: progress });
+            self.postMessage({ type: 'progress', payload: { ...progress, model: payload.model } });
           },
         }, appConfig);
         isModelLoaded = true;
-        self.postMessage({ type: 'init-done', payload: "Model loaded successfully!" });
+        self.postMessage({ type: 'init-done', payload: { model: payload.model, message: "Model loaded successfully!" } });
       } catch (error) {
-        self.postMessage({ type: 'error', payload: 'Failed to initialize model: ' + (error instanceof Error ? error.message : String(error)) });
+        self.postMessage({ type: 'error', payload: { model: payload.model, message: 'Failed to initialize model: ' + (error instanceof Error ? error.message : String(error)) } });
       }
     }
 
     if (type === 'generate-text') {
-      if (!engine || !isModelLoaded) { self.postMessage({ type: 'error', payload: "Model not initialized." }); return; }
+      if (!engine || !isModelLoaded) { self.postMessage({ type: 'error', payload: { model: currentModelName, message: "Model not initialized." } }); return; }
       try {
         const messages = [{ role: 'user', content: payload.prompt }];
         const chunks = await engine.chat.completions.create({ messages, stream: true });
@@ -44,13 +59,13 @@ const captionWorkerScript = `
         }
         self.postMessage({ type: 'text-result', payload: { ...payload, result } });
       } catch (err) {
-        self.postMessage({ type: 'error', payload: 'Text generation failed: ' + (err instanceof Error ? err.message : String(err)) });
+        self.postMessage({ type: 'error', payload: { model: currentModelName, message: 'Text generation failed: ' + (err instanceof Error ? err.message : String(err)) } });
       }
     }
 
     if (type === 'generate-chat') {
       if (!engine || !isModelLoaded) {
-        self.postMessage({ type: 'error', payload: "Model not initialized." });
+        self.postMessage({ type: 'error', payload: { model: currentModelName, message: "Model not initialized." } });
         return;
       }
       try {
@@ -70,13 +85,12 @@ const captionWorkerScript = `
         
         self.postMessage({ type: 'chat-complete', payload: { fullResponse, requestId: payload.requestId } });
       } catch (err) {
-        self.postMessage({ type: 'error', payload: 'Chat generation failed: ' + (err instanceof Error ? err.message : String(err)) });
+        self.postMessage({ type: 'error', payload: { model: currentModelName, message: 'Chat generation failed: ' + (err instanceof Error ? err.message : String(err)) } });
       }
     }
   };
 `;
 
-// Interface definitions (no changes needed here)
 interface GenerateInitialCanvasItemsProps {
   customPrompt: string;
   textFileContent: string | null;
@@ -108,369 +122,324 @@ type TextResultPayload = {
   originalTitle?: string;
 };
 
-// Main hook implementation
+type WorkerMessagePayload = {
+  text?: string;
+  model: string; // To identify which model's progress/error it is
+  message?: string; // For errors or init-done messages
+};
+
+type CreativePendingRequest = {
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+};
+
+type ChatbotPendingRequest = {
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+  onChunk?: (chunk: string) => void;
+};
+
+
 const useWebLLM = () => {
-  const [worker, setWorker] = useState<Worker | null>(null);
-  const [modelLoaded, setModelLoaded] = useState(false);
-  const [modelProgress, setModelProgress] = useState('');
+  const creativeWorkerRef = useRef<Worker | null>(null);
+  const chatbotWorkerRef = useRef<Worker | null>(null);
+
+  const [creativeModelLoaded, setCreativeModelLoaded] = useState(false);
+  const [creativeModelProgress, setCreativeModelProgress] = useState('');
+  const [chatbotModelLoaded, setChatbotModelLoaded] = useState(false);
+  const [chatbotModelProgress, setChatbotModelProgress] = useState('');
 
   const [isLoadingInitialItems, setIsLoadingInitialItems] = useState(false);
   const [isLoadingAdaptation, setIsLoadingAdaptation] = useState<Record<string, Partial<Record<SocialPlatform, boolean>>>>({});
   const [isLoadingPromptSuggestion, setIsLoadingPromptSuggestion] = useState(false);
+  const [isLoadingChatMessage, setIsLoadingChatMessage] = useState(false);
 
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // General error for now
   const [rawAIResponse, setRawAIResponse] = useState<string | null>(null);
   const [suggestAIPrompt, setSuggestAIPrompt] = useState<string | null>(null);
-  const [requestType, setRequestType] = useState<string | null>(null);
+  const [requestType, setRequestType] = useState<string | null>(null); // For creative worker text results
 
-  const pendingRequests = useRef<Record<string, { resolve: (value: any) => void, reject: (reason?: any) => void, onChunk?: (chunk: string) => void}>>({});
-  const [isLoadingChatMessage, setIsLoadingChatMessage] = useState(false);
-  // ++ IMPROVEMENT: Centralized AI response cleaning function
+  const pendingCreativeRequests = useRef<Record<string, CreativePendingRequest>>({});
+  const pendingChatbotRequests = useRef<Record<string, ChatbotPendingRequest>>({});
+
   const cleanAIResponseString = (rawText: string): string => {
-    // This function removes common conversational filler, model-specific tokens, and markdown artifacts.
     return String(rawText)
       .replace(/<End-of-Turn>/gi, '')
-      .replace(/<think>[\s\S]*?<\/think>/gs, '') // Remove "chain of thought" blocks
+      .replace(/<think>[\s\S]*?<\/think>/gs, '')
       .replace(/^(here's your suggestion:|here's the adapted text:|adapted text for \w+:|suggested prompt:|certainly, here is the suggestion:|here's a prompt:)\s*/im, '')
-      .replace(/```(?:\w+\n)?([\s\S]+)```/, '$1') // Extract content from markdown code blocks
-      .replace(/["'*`_~]/g, '') // Remove common markdown characters that aren't part of the content
+      .replace(/```(?:\w+\n)?([\s\S]+)```/, '$1')
+      .replace(/["'*`_~]/g, '')
       .trim();
   };
 
-
   useEffect(() => {
     const blob = new Blob([captionWorkerScript], { type: 'application/javascript' });
-    const url = URL.createObjectURL(blob);
-    const newWorker = new Worker(url, { type: 'module' });
-    setWorker(newWorker);
+    const workerScriptURL = URL.createObjectURL(blob);
 
-    newWorker.onmessage = (event: MessageEvent<any>) => {
+    // Initialize Creative Worker
+    const newCreativeWorker = new Worker(workerScriptURL, { type: 'module' });
+    creativeWorkerRef.current = newCreativeWorker;
+    newCreativeWorker.onmessage = (event: MessageEvent<any>) => {
       const { type, payload } = event.data as { type: string; payload: any };
       switch (type) {
         case 'progress':
-          setModelProgress(payload.text);
+          setCreativeModelProgress((payload as WorkerMessagePayload).text || 'Processing...');
           break;
         case 'init-done':
-          setModelLoaded(true);
-          setModelProgress(payload);
-          setIsLoadingInitialItems(false);
+          setCreativeModelLoaded(true);
+          setCreativeModelProgress((payload as WorkerMessagePayload).message || 'Creative model ready.');
           break;
         case 'text-result':
           {
-            const { result, requestType, originalItemId, targetPlatform, originalTitle } = payload as TextResultPayload;
-
-            // Store the raw response for debugging if needed, then process it.
-            if (requestType === 'suggestPrompt') {
-              setSuggestAIPrompt(result);
-            } else {
-              setRawAIResponse(result);
-            }
-            setRequestType(requestType);
+            const { result, requestType: reqType, originalItemId, targetPlatform, originalTitle } = payload as TextResultPayload;
+            if (reqType === 'suggestPrompt') setSuggestAIPrompt(result);
+            else setRawAIResponse(result);
+            setRequestType(reqType);
 
             let requestId = '';
-            if (requestType === 'initialCanvasItems') {
-              requestId = 'initialCanvasItems';
-            } else if (requestType === 'adaptCanvasItem' && originalItemId && targetPlatform) {
-              requestId = `adapt-${originalItemId}-${targetPlatform}`;
-            } else if (requestType === 'suggestPrompt' && originalTitle) {
-              requestId = `suggestPrompt-${originalTitle}`;
-            }
-
-            // ++ FIX: Read from the ref's .current property
-            if (requestId && pendingRequests.current[requestId]) {
-              pendingRequests.current[requestId].resolve(result);
-              // ++ FIX: Mutate the ref directly to remove the completed request
-              delete pendingRequests.current[requestId];
-            }
-
-            // Update loading states
-            if (requestType === 'initialCanvasItems') setIsLoadingInitialItems(false);
-            else if (requestType === 'adaptCanvasItem' && originalItemId && targetPlatform) {
-              setIsLoadingAdaptation(prev => ({
-                ...prev,
-                [originalItemId]: { ...prev[originalItemId], [targetPlatform]: false }
-              }));
-            } else if (requestType === 'suggestPrompt') setIsLoadingPromptSuggestion(false);
-          }
-          break;
-
-        case 'chat-chunk':
-          {
-            const { chunk, requestId } = payload;
-             // ++ FIX: Read from the ref's .current property
-            const request = pendingRequests.current[requestId];
-            if (request && request.onChunk) {
-              request.onChunk(chunk); // Call the specific onChunk callback for this request
-            }
-          }
-          break;
-
-        case 'chat-complete':
-          {
-            const { fullResponse, requestId } = payload;
-            const request = pendingRequests.current[requestId];
+            if (reqType === 'initialCanvasItems') requestId = 'initialCanvasItems';
+            else if (reqType === 'adaptCanvasItem' && originalItemId && targetPlatform) requestId = `adapt-${originalItemId}-${targetPlatform}`;
+            else if (reqType === 'suggestPrompt' && originalTitle) requestId = `suggestPrompt-${originalTitle}`;
             
-            if (request) {
-              request.resolve(fullResponse); // Resolve the promise with the final text
-              delete pendingRequests.current[requestId];
+            if (requestId && pendingCreativeRequests.current[requestId]) {
+              pendingCreativeRequests.current[requestId].resolve(result);
+              delete pendingCreativeRequests.current[requestId];
             }
-            setIsLoadingChatMessage(false); // Stop loading indicator
+
+            if (reqType === 'initialCanvasItems') setIsLoadingInitialItems(false);
+            else if (reqType === 'adaptCanvasItem' && originalItemId && targetPlatform) {
+              setIsLoadingAdaptation(prev => ({ ...prev, [originalItemId]: { ...prev[originalItemId], [targetPlatform]: false } }));
+            } else if (reqType === 'suggestPrompt') setIsLoadingPromptSuggestion(false);
           }
           break;
-
         case 'error':
           {
-            const errorMessage = typeof payload === 'string' ? payload : 'An unknown error occurred in the AI worker.';
-            setError(errorMessage);
-            setRawAIResponse(`AI Worker Error:\n${errorMessage}`);
-
-            // Reject all pending requests on critical error
-            Object.values(pendingRequests.current).forEach(p => p.reject(new Error(errorMessage)));
-            pendingRequests.current = {};
-
-            // Reset all loading states
+            const errorPayload = payload as WorkerMessagePayload;
+            const errorMessage = errorPayload.message || 'An unknown error occurred in the creative AI worker.';
+            setError(`Creative Model Error: ${errorMessage}`);
+            setCreativeModelProgress('Error encountered.');
+            // Reject relevant pending requests
+            Object.values(pendingCreativeRequests.current).forEach((p: CreativePendingRequest) => p.reject(new Error(errorMessage)));
+            pendingCreativeRequests.current = {};
             setIsLoadingInitialItems(false);
             setIsLoadingAdaptation({});
             setIsLoadingPromptSuggestion(false);
-            setModelProgress('Error encountered.');
           }
           break;
       }
     };
+    setCreativeModelProgress('Initializing Creative AI model...');
+    newCreativeWorker.postMessage({ type: 'init', payload: { model: WEBLLM_CREATIVE_MODEL } });
 
-    setIsLoadingInitialItems(true);
-    setModelProgress('Initializing AI model...');
-    newWorker.postMessage({ type: 'init', payload: { model: WEBLLM_SELECTED_MODEL } });
-
-    return () => {
-      newWorker.terminate();
-      URL.revokeObjectURL(url);
+    // Initialize Chatbot Worker
+    const newChatbotWorker = new Worker(workerScriptURL, { type: 'module' });
+    chatbotWorkerRef.current = newChatbotWorker;
+    newChatbotWorker.onmessage = (event: MessageEvent<any>) => {
+      const { type, payload } = event.data as { type: string; payload: any };
+      switch (type) {
+        case 'progress':
+          setChatbotModelProgress((payload as WorkerMessagePayload).text || 'Processing...');
+          break;
+        case 'init-done':
+          setChatbotModelLoaded(true);
+          setChatbotModelProgress((payload as WorkerMessagePayload).message || 'Chatbot model ready.');
+          break;
+        case 'chat-chunk':
+          {
+            const { chunk, requestId } = payload;
+            const request = pendingChatbotRequests.current[requestId];
+            if (request && request.onChunk) request.onChunk(chunk);
+          }
+          break;
+        case 'chat-complete':
+          {
+            const { fullResponse, requestId } = payload;
+            const request = pendingChatbotRequests.current[requestId];
+            if (request) {
+              request.resolve(fullResponse);
+              delete pendingChatbotRequests.current[requestId];
+            }
+            setIsLoadingChatMessage(false);
+          }
+          break;
+        case 'error':
+          {
+            const errorPayload = payload as WorkerMessagePayload;
+            const errorMessage = errorPayload.message || 'An unknown error occurred in the chatbot AI worker.';
+            setError(`Chatbot Model Error: ${errorMessage}`); // Consider if this should be a separate error state
+            setChatbotModelProgress('Error encountered.');
+             // Reject relevant pending requests
+            Object.values(pendingChatbotRequests.current).forEach((p: ChatbotPendingRequest) => p.reject(new Error(errorMessage)));
+            pendingChatbotRequests.current = {};
+            setIsLoadingChatMessage(false);
+          }
+          break;
+      }
     };
-  }, []); // Empty dependency array is correct, this effect should only run once.
+    setChatbotModelProgress('Initializing Chatbot AI model...');
+    newChatbotWorker.postMessage({ type: 'init', payload: { model: WEBLLM_CHATBOT_MODEL } });
+    
+    return () => {
+      newCreativeWorker.terminate();
+      newChatbotWorker.terminate();
+      URL.revokeObjectURL(workerScriptURL);
+    };
+  }, []);
 
   const generateInitialCanvasItems = useCallback((props: GenerateInitialCanvasItemsProps): Promise<string[]> => {
     return new Promise<string[]>((resolve, reject) => {
-      if (!worker || !modelLoaded) {
-        const err = "AI Model is not ready.";
-        setError(err);
-        return reject(new Error(err));
+      if (!creativeWorkerRef.current || !creativeModelLoaded) {
+        const err = "Creative AI Model is not ready.";
+        setError(err); return reject(new Error(err));
       }
       if (!props.customPrompt && !props.textFileContent) {
         const err = "Please provide some input for idea generation.";
-        setError(err);
-        return reject(new Error(err));
+        setError(err); return reject(new Error(err));
       }
-
-      setIsLoadingInitialItems(true);
-      setError(null);
-
-      // ++ MAJOR CHANGE: Robust response parsing for a small model.
-      // Instead of trying to parse JSON, which is error-prone for small models,
-      // we now parse a numbered list from the free-text response.
-      pendingRequests.current['initialCanvasItems'] = {
+      setIsLoadingInitialItems(true); setError(null);
+      pendingCreativeRequests.current['initialCanvasItems'] = {
         resolve: (rawText: string) => {
-          console.log("Raw AI Response for initial items:", rawText);
           const posts: string[] = [];
-          // Regex to find lines starting with a number and a period (e.g., "1. ...").
-          // The 's' flag allows '.' to match newlines, capturing multi-line posts.
           const matches = rawText.matchAll(/^\s*\d+\.\s*([\s\S]*?)(?=\n\s*\d+\.|$)/gm);
-
           for (const match of matches) {
-              // The first capture group is the content of the post.
-              if (match[1]) {
-                  // Clean up the captured text.
-                  const cleanedPost = match[1].trim();
-                  if (cleanedPost) {
-                      posts.push(cleanedPost);
-                  }
-              }
-          }
-
-          if (posts.length === 0) {
-            console.warn("Could not parse a numbered list from the AI response. Splitting by newline as a fallback.", rawText);
-            // Fallback for when the model fails to create a numbered list.
-            const fallbackPosts = rawText.split('\n\n')
-                .map(p => cleanAIResponseString(p)) // Use the cleaner on each part
-                .filter(p => p.length > 10); // Filter out empty or very short lines
-            
-            if (fallbackPosts.length === 0) {
-                return reject(new Error("AI response could not be parsed into separate posts."));
+            if (match[1]) {
+              const cleanedPost = match[1].trim();
+              if (cleanedPost) posts.push(cleanedPost);
             }
-            resolve(fallbackPosts.slice(0, props.numberOfIdeas));
+          }
+          if (posts.length === 0) {
+            const fallbackPosts = rawText.split('\n\n').map(p => cleanAIResponseString(p)).filter(p => p.length > 10);
+            if (fallbackPosts.length === 0) return reject(new Error("AI response could not be parsed."));
+            try {
+              const parsed = JSON.parse(rawText);
+              if (Array.isArray(parsed)) {
+                const trimmed = parsed.map((s) => String(s).trim()).filter(Boolean);
+                if (trimmed.length > 0) {
+                  return resolve(trimmed.slice(0, props.numberOfIdeas));
+                }
+              }
+            } catch (_) {
+              resolve(fallbackPosts.slice(0, props.numberOfIdeas));
+            }
           } else {
-             resolve(posts.slice(0, props.numberOfIdeas));
+            resolve(posts.slice(0, props.numberOfIdeas));
           }
         },
         reject
       };
-
-      // ++ MAJOR CHANGE: The prompt no longer asks for JSON.
-      // It now requests a simple numbered list, which is much easier for a small model to generate correctly.
       const prompt = `Act as an expert social media copywriter.
-      Your task is to write exactly ${props.numberOfIdeas} distinct social media posts based on the provided details.
-
+      Your task is to write exactly ${props.numberOfIdeas} distinct social media posts based on the provided details. The posts should be varied in structure, style, and length.
       Platform Context: ${props.platform}
       Desired Tone: ${props.tone}
       Core Message/Prompt: ${props.customPrompt}
       Additional details from text file: ${props.textFileContent || 'None'}
 
-      IMPORTANT: You must respond ONLY with a valid JSON array of strings, where each string is a complete, ready-to-use social media post. Do not write a strategy or ideas for posts; write the posts themselves.. Do not write anything else.
+      IMPORTANT: You must respond ONLY with a valid JSON array of strings, where each string is a complete, ready-to-use social media post. Do not write a strategy or ideas for posts; write the posts themselves.
 
       Example Response:
       [
         "Is it a latte kind of morning or a black coffee day? 🤔 Let us know your go-to order in the comments! #MorningRitual #CoffeeQuestion #TheDailyGrind",
-        "Behind every cup of our Signature Roast is a story. 🌱 We partner with a family-run farm in the highlands of Colombia, where these beans are hand-picked and sun-dried to perfection. It’s more than just coffee; it’s a connection. #BeanToCup #EthicalSourcing #CoffeeStory",
-        "Ready to perfect your French Press? Here are 3 quick tips: 1️⃣ Use coarse ground beans. 2️⃣ Steep for exactly 4 minutes. 3️⃣ Press the plunger down slowly. Enjoy! ☕️ #CoffeeTips #HomeBarista #BrewGuide"
-      ]`;
-
-      worker.postMessage({ type: 'generate-text', payload: { prompt, requestType: 'initialCanvasItems' } });
+        "Behind every cup of our Signature Roast is a story. 🌱\\n\\nWe partner with a family-run farm in the highlands of Colombia, where these beans are hand-picked and sun-dried to perfection. The result? A smooth, balanced flavor with notes of caramel and citrus.\\n\\nIt’s more than just coffee; it’s a connection. #BeanToCup #EthicalSourcing #CoffeeStory #CraftedWithCare",
+        "Ready to perfect your French Press? Here are 3 quick tips:\\n1️⃣ Use coarse ground beans (like our House Blend!)\\n2️⃣ Steep for exactly 4 minutes.\\n3️⃣ Press the plunger down slowly and steadily.\\nEnjoy that perfect cup! ☕️ #CoffeeTips #HomeBarista #BrewGuide",
+        "Our Summer Cold Brew is back for a limited time! ☀️🧊 Tag a friend who needs this in their life ASAP. 👇 #ColdBrew #SummerVibes #LimitedEdition #TagAFriend",
+        "That Friday feeling, powered by our place. ✨ Show us how you're enjoying your weekend coffee by tagging us! #WeekendCoffee #CommunityLove #CoffeeShopVibes"
+      ]
+      `;
+      creativeWorkerRef.current.postMessage({ type: 'generate-text', payload: { prompt, requestType: 'initialCanvasItems' } });
     });
-  }, [worker, modelLoaded]);
+  }, [creativeModelLoaded]);
 
   const adaptCanvasItem = useCallback((props: AdaptCanvasItemProps): Promise<string> => {
     return new Promise((resolve, reject) => {
-        if (!worker || !modelLoaded) {
-            const err = "AI Model is not ready for adaptation.";
-            setError(err);
-            return reject(new Error(err));
-        }
-
-        setIsLoadingAdaptation(prev => ({
-            ...prev,
-            [props.itemId]: { ...prev[props.itemId], [props.targetPlatform]: true }
-        }));
-        setError(null);
-
-        const requestId = `adapt-${props.itemId}-${props.targetPlatform}`;
-        pendingRequests.current[requestId] = {
-          resolve: (rawText: string) => {
-              // Use the centralized cleaner function
-              resolve(cleanAIResponseString(rawText));
-          },
-          reject
-        };
-
-        const prompt = `Adapt the following social media text specifically for the ${props.targetPlatform} platform.
-        Original Idea Text: "${props.originalText}"
-        Original Tone for context: ${props.baseTone}
-        Key Message/Topic from original prompt: ${props.customPrompt || 'General content based on original text.'}
-
-        Platform-specific Instructions:
-        - For X (formerly Twitter): Be concise and punchy (under 280 chars). Use 1-3 highly relevant hashtags.
-        - For LinkedIn: Adopt a professional tone (200-500 words). Include a call-to-action or a thought-provoking question. Use professional hashtags.
-        - For Instagram: Write a strong visual hook. Use 5-10 relevant hashtags and emojis where appropriate.
-        - For Facebook: Write 1-3 engaging paragraphs. Encourage comments by asking questions.
-        - For TikTok: Write a very short, catchy description (under 150 chars) with trending/relevant hashtags.
-
-        IMPORTANT: Your output must ONLY be the adapted text itself. Do not add any conversational lead-in, explanation, or markdown formatting.
-        `;
-
-        worker.postMessage({
-            type: 'generate-text',
-            payload: {
-                prompt,
-                requestType: 'adaptCanvasItem',
-                originalItemId: props.itemId,
-                targetPlatform: props.targetPlatform
-            }
-        });
+      if (!creativeWorkerRef.current || !creativeModelLoaded) {
+        const err = "Creative AI Model is not ready for adaptation.";
+        setError(err); return reject(new Error(err));
+      }
+      setIsLoadingAdaptation(prev => ({ ...prev, [props.itemId]: { ...prev[props.itemId], [props.targetPlatform]: true } }));
+      setError(null);
+      const requestId = `adapt-${props.itemId}-${props.targetPlatform}`;
+      pendingCreativeRequests.current[requestId] = {
+        resolve: (rawText: string) => resolve(cleanAIResponseString(rawText)),
+        reject
+      };
+      const prompt = `Adapt the following social media text specifically for the ${props.targetPlatform} platform.
+      Original Idea Text: "${props.originalText}"
+      Original Tone for context: ${props.baseTone}
+      Key Message/Topic from original prompt: ${props.customPrompt || 'General content based on original text.'}
+      Platform-specific Instructions:
+      - For X (formerly Twitter): Concise (under 280 chars), 1-3 relevant hashtags.
+      - For LinkedIn: Professional tone (200-500 words), call-to-action/question, professional hashtags.
+      - For Instagram: Strong visual hook, 5-10 relevant hashtags/emojis.
+      - For Facebook: 1-3 engaging paragraphs, encourage comments.
+      - For TikTok: Short, catchy description (under 150 chars), trending/relevant hashtags.
+      IMPORTANT: Your output must ONLY be the adapted text itself. No conversational lead-in, platform adapted, explanation, or markdown.`;
+      creativeWorkerRef.current.postMessage({ type: 'generate-text', payload: { prompt, requestType: 'adaptCanvasItem', originalItemId: props.itemId, targetPlatform: props.targetPlatform }});
     });
-  }, [worker, modelLoaded]);
+  }, [creativeModelLoaded]);
 
   const suggestPromptForCanvasTitle = useCallback((title: string): Promise<string> => {
     return new Promise((resolve, reject) => {
-      if (!worker || !modelLoaded) {
-        const err = "AI Model is not ready for prompt suggestion.";
-        setError(err);
-        return reject(new Error(err));
+      if (!creativeWorkerRef.current || !creativeModelLoaded) {
+        const err = "Creative AI Model is not ready for prompt suggestion.";
+        setError(err); return reject(new Error(err));
       }
       if (!title.trim()) {
-        const err = "Canvas title is required to suggest a prompt.";
-        setError(err);
-        return reject(new Error(err));
+        const err = "Canvas title is required.";
+        setError(err); return reject(new Error(err));
       }
-
-      setIsLoadingPromptSuggestion(true);
-      setError(null);
-
+      setIsLoadingPromptSuggestion(true); setError(null);
       const requestId = `suggestPrompt-${title}`;
-       pendingRequests.current[requestId] = {
-        resolve: (rawText: string) => {
-            // Use the centralized cleaner function
-            resolve(cleanAIResponseString(rawText));
-        },
+      pendingCreativeRequests.current[requestId] = {
+        resolve: (rawText: string) => resolve(cleanAIResponseString(rawText)),
         reject
       };
-
-    // -- FIX: This is the heavily revised prompt --
-    // ++ CHANGE: This prompt is heavily simplified for a smaller model.
-    // It makes the task less abstract and focuses on a single, clear output.
-    const promptToAI = `
-    Your job is to write a single, effective sentence I can use as a prompt to generate social media posts.
-    The topic is: "${title}"
-    
-    CRITICAL: Respond with ONLY the prompt itself. Do not say "Here is a prompt" or anything else.
-
-    EXAMPLE:
-    If the topic was "Our New Sustainable Coffee Blend", your entire response should be:
-    "Generate social media posts about our new eco-friendly coffee, focusing on the rich taste, sustainable sourcing, and how it improves the morning ritual."
-
-    Now, write the prompt for the topic: "${title}"
-    `;
-
-    worker.postMessage({ type: 'generate-text', payload: { prompt: promptToAI, requestType: 'suggestPrompt', originalTitle: title } });
+      const promptToAI = `Your job is to write a single, effective sentence I can use as a prompt to generate social media posts.
+      The topic is: "${title}"
+      CRITICAL: Respond with ONLY the prompt itself. Do not say "Here is a prompt" or anything else.
+      EXAMPLE: 
+      If topic was "Our New Sustainable Coffee Blend", 
+      respond: "Generate social media posts about our new eco-friendly coffee, focusing on rich taste, sustainable sourcing, and how it improves the morning ritual."
+      Now, write the prompt for the topic: "${title}"`;
+      creativeWorkerRef.current.postMessage({ type: 'generate-text', payload: { prompt: promptToAI, requestType: 'suggestPrompt', originalTitle: title } });
     });
-  }, [worker, modelLoaded]);
+  }, [creativeModelLoaded]);
 
   const generateChatResponse = useCallback((props: GenerateChatResponseProps): Promise<string> => {
     return new Promise<string>((resolve, reject) => {
-      if (!worker || !modelLoaded) {
-        const err = "AI Model is not ready for chat.";
-        setError(err);
-        return reject(new Error(err));
+      if (!chatbotWorkerRef.current || !chatbotModelLoaded) {
+        const err = "Chatbot AI Model is not ready.";
+        setError(err); return reject(new Error(err));
       }
-
-      setIsLoadingChatMessage(true);
-      setError(null);
-
+      setIsLoadingChatMessage(true); setError(null);
       const requestId = `chat-${Date.now()}`;
-      
-      // Store the promise handlers and the onChunk callback
-      pendingRequests.current[requestId] = { resolve, reject, onChunk: props.onChunk };
-      
-      // Construct the full message history to send to the worker
+      pendingChatbotRequests.current[requestId] = { resolve, reject, onChunk: props.onChunk };
       const messagesForEngine = [
         { role: 'system', content: CHATBOT_SYSTEM_INSTRUCTION },
         ...props.history,
         { role: 'user', content: props.userMessage }
       ];
-      
-      worker.postMessage({
-          type: 'generate-chat', // Use the new, dedicated command
-          payload: {
-              messages: messagesForEngine,
-              requestId
-          }
-      });
+      chatbotWorkerRef.current.postMessage({ type: 'generate-chat', payload: { messages: messagesForEngine, requestId } });
     });
-  }, [worker, modelLoaded]);
+  }, [chatbotModelLoaded]);
 
   return {
-    modelLoaded,
-    modelProgress,
+    creativeModelLoaded,
+    creativeModelProgress,
+    chatbotModelLoaded,
+    chatbotModelProgress,
     isLoadingInitialItems,
     isLoadingAdaptation,
     isLoadingPromptSuggestion,
     isLoadingChatMessage,
     error,
-    rawAIResponse, // Still useful for debugging
-    suggestAIPrompt, // Still useful for debugging
-    requestType, // Still useful for debugging
+    rawAIResponse, 
+    suggestAIPrompt, 
+    requestType, 
     generateInitialCanvasItems,
     adaptCanvasItem,
     suggestPromptForCanvasTitle,
     setError,
-    generateChatResponse, // Included
+    generateChatResponse,
   };
 };
 

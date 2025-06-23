@@ -32,3 +32,8 @@ export const WEBLLM_SELECTED_MODEL = "Mistral-7B-Instruct-v0.3-q4f32_1-MLC"; // 
 // export const WEBLLM_SELECTED_MODEL = "Phi-3.5-mini-instruct-q4f32_1-MLC"; // Keeping user's current model
 // export const WEBLLM_SELECTED_MODEL = "SmolLM2-1.7B-Instruct-q4f16_1-MLC"; // Keeping user's current model
 // export const WEBLLM_SELECTED_MODEL = "SmolLM2-360M-Instruct-q0f16-MLC"; // Keeping user's current model
+// Model for creative content generation (e.g., on Content Canvas page)
+export const WEBLLM_CREATIVE_MODEL = "Hermes-3-Llama-3.2-3B-q4f32_1-MLC"; 
+
+// Model for chatbot interactions
+export const WEBLLM_CHATBOT_MODEL = "stablelm-2-zephyr-1_6b-q4f16_1-MLC";
