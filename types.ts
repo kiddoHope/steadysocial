@@ -74,14 +74,7 @@ export interface ContentCanvas {
   reviewedAt?: number; // Timestamp of last review action
   adminFeedback?: string; // General feedback from Admin for the whole canvas if revision is needed
 }
-// In types.ts
 
-// This is the new structure for an adaptation
-export interface Adaptation {
-  text: string;
-  reasoning: string;
-  // You could add more metadata here in the future
-}
 
 // This type might be used internally by useWebLLM before structuring into CanvasItem
 export interface InitialIdea { 
@@ -92,6 +85,7 @@ export interface InitialIdea {
 export interface FacebookSettings {
   sdkUrl: string;
   pageId: string;
+  appId: string; // Added appId for Facebook SDK initialization
 }
 
 export type Theme = 'light' | 'dark';

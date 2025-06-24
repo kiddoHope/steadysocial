@@ -2,19 +2,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth, UserRole } from '../contexts/AuthContext';
-import { FacebookSettings, User } from '../types'; // Added User import
+import { FacebookSettings, User, Theme } from '../types'; 
 import { getFacebookSettings, saveFacebookSettings } from '../services/settingsService';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Alert from '../components/ui/Alert';
+import LoadingSpinner from '../components/ui/LoadingSpinner';
 
 const SettingsPage: React.FC = () => {
   const { theme, setThemeExplicitly } = useTheme();
   const { currentUser, updateUserProfile, updateUserPassword } = useAuth();
 
   // Facebook Settings
-  const [fbSettings, setFbSettings] = useState<FacebookSettings>({ sdkUrl: '', pageId: '' });
+  const [fbSettings, setFbSettings] = useState<FacebookSettings>(getFacebookSettings()); // Initialize with current settings
   const [fbNotification, setFbNotification] = useState<string | null>(null);
 
   // Personalization Settings
@@ -23,19 +24,83 @@ const SettingsPage: React.FC = () => {
   const [username, setUsername] = useState(currentUser?.username || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [personalizationNotification, setPersonalizationNotification] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null); // Added 'info'
+  const [personalizationNotification, setPersonalizationNotification] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
+  // AI Model Cache Settings
+  const [cachedModels, setCachedModels] = useState<string[]>([]);
+  const [cacheLoading, setCacheLoading] = useState(false);
+  const [cacheNotification, setCacheNotification] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
+
   useEffect(() => {
-    if (currentUser?.role === UserRole.ADMIN) {
-      setFbSettings(getFacebookSettings());
-    }
+    // fbSettings are already initialized with getFacebookSettings()
+    // No need to call it again here unless currentUser.role changes visibility logic not state.
     setUsername(currentUser?.username || '');
     setProfilePicturePreview(currentUser?.profilePictureUrl || null);
   }, [currentUser]);
 
-  const handleFbSettingsChange = (event: { target: HTMLInputElement | HTMLTextAreaElement }) => {
-    setFbSettings({ ...fbSettings, [event.target.name]: event.target.value });
+  const fetchCachedModels = useCallback(async () => {
+    setCacheLoading(true);
+    setCacheNotification(null);
+    try {
+      if (!window.caches) {
+        setCacheNotification({ type: 'error', message: 'Cache API is not available in this browser.' });
+        setCachedModels([]);
+        return;
+      }
+      const keys = await window.caches.keys();
+      const webLlmCacheKeys = keys.filter(key =>
+        key.toLowerCase().includes('mlc') ||
+        key.toLowerCase().includes('web-llm-model') ||
+        key.toLowerCase().includes('llm-chat')
+      );
+      setCachedModels(webLlmCacheKeys);
+      if (webLlmCacheKeys.length === 0 && !cacheLoading) { 
+         // setCacheNotification({ type: 'info', message: 'No WebLLM related models found in cache.' });
+      }
+    } catch (err) {
+      console.error("Error fetching cached models:", err);
+      setCacheNotification({ type: 'error', message: 'Failed to fetch cached models.' });
+      setCachedModels([]);
+    } finally {
+      setCacheLoading(false);
+    }
+  }, []); 
+
+  useEffect(() => {
+    fetchCachedModels();
+  }, [fetchCachedModels]);
+
+  const handleRemoveCachedModel = useCallback(async (cacheName: string) => {
+    setCacheLoading(true);
+    setCacheNotification(null);
+    try {
+      if (!window.caches) {
+        setCacheNotification({ type: 'error', message: 'Cache API is not available in this browser.' });
+        return;
+      }
+      const success = await window.caches.delete(cacheName);
+      if (success) {
+        setCacheNotification({ type: 'success', message: `Cache "${cacheName}" removed successfully.` });
+        await fetchCachedModels(); 
+      } else {
+        setCacheNotification({ type: 'info', message: `Cache "${cacheName}" was not found or already removed.` });
+        await fetchCachedModels(); 
+      }
+    } catch (err) {
+      console.error(`Error removing cache "${cacheName}":`, err);
+      setCacheNotification({ type: 'error', message: `Failed to remove cache "${cacheName}".` });
+    } finally {
+      setCacheLoading(false);
+    }
+  }, [fetchCachedModels]);
+
+
+  // Use the same type as Input component expects
+  // import InputOrTextareaChangeEvent from '../components/ui/Input';
+
+  const handleFbSettingsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setFbSettings({ ...fbSettings, [e.target.name]: e.target.value });
   };
 
   const handleSaveFbSettings = (e: React.FormEvent) => {
@@ -45,28 +110,33 @@ const SettingsPage: React.FC = () => {
     setTimeout(() => setFbNotification(null), 3000);
   };
 
-  const handleThemeChange = (selectedTheme: 'light' | 'dark') => {
+  const handleThemeChange = (selectedTheme: Theme) => {
     setThemeExplicitly(selectedTheme);
-    // Using personalizationNotification for theme change message for simplicity
     setPersonalizationNotification({ type: 'success', message: `Theme changed to ${selectedTheme} mode.`});
     setTimeout(() => setPersonalizationNotification(null), 3000);
   };
 
-  const handleProfilePictureChange = (event: any) => {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    if (file) {
-      setProfilePictureFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfilePicturePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      setProfilePictureFile(null);
-      setProfilePicturePreview(currentUser?.profilePictureUrl || null); // Revert to current or none
+  // Accept ChangeEvent<HTMLInputElement | HTMLTextAreaElement> for compatibility with Input component
+  const handleProfilePictureChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    // Only handle file input
+    if (event.target instanceof HTMLInputElement && event.target.type === "file") {
+      const file = event.target.files?.[0];
+      if (file) {
+        setProfilePictureFile(file);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setProfilePicturePreview(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setProfilePictureFile(null);
+        setProfilePicturePreview(currentUser?.profilePictureUrl || null);
+      }
     }
   };
+
 
   const handlePersonalizationSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,13 +146,12 @@ const SettingsPage: React.FC = () => {
 
     let profileUpdates: Partial<Pick<User, 'username' | 'profilePictureUrl'>> = {};
     let passwordUpdated = false;
+    let profileUpdated = false;
 
-    // Update username if changed
     if (username !== currentUser.username) {
       profileUpdates.username = username;
     }
 
-    // Update profile picture if a new one is previewed
     if (profilePicturePreview && profilePicturePreview !== currentUser.profilePictureUrl) {
         profileUpdates.profilePictureUrl = profilePicturePreview;
     }
@@ -90,16 +159,14 @@ const SettingsPage: React.FC = () => {
     if (Object.keys(profileUpdates).length > 0) {
         const result = await updateUserProfile(currentUser.id, profileUpdates);
         if (result.success) {
-            setPersonalizationNotification({ type: 'success', message: result.message || 'Profile details updated!' });
+            profileUpdated = true;
         } else {
             setPersonalizationNotification({ type: 'error', message: result.message || 'Failed to update profile details.' });
             setIsUpdatingProfile(false);
-            return; // Stop if profile update failed (e.g. username taken)
+            return;
         }
     }
 
-
-    // Update password if new password is provided and confirmed
     if (newPassword) {
       if (newPassword !== confirmPassword) {
         setPersonalizationNotification({ type: 'error', message: 'New passwords do not match.' });
@@ -108,14 +175,9 @@ const SettingsPage: React.FC = () => {
       }
       const passResult = await updateUserPassword(currentUser.id, newPassword);
        if (passResult.success) {
-            // If profile also updated, append to message, else set new message.
-            setPersonalizationNotification(prev => ({
-                type: 'success',
-                message: prev && Object.keys(profileUpdates).length > 0 ? (prev.message + " Password updated.") : (passResult.message || "Password updated!")
-            }));
+            passwordUpdated = true;
             setNewPassword('');
             setConfirmPassword('');
-            passwordUpdated = true;
         } else {
             setPersonalizationNotification({ type: 'error', message: passResult.message || 'Failed to update password.' });
             setIsUpdatingProfile(false);
@@ -123,10 +185,16 @@ const SettingsPage: React.FC = () => {
         }
     }
     
-    if (!Object.keys(profileUpdates).length && !passwordUpdated) {
-        setPersonalizationNotification({ type: 'info', message: 'No changes detected.'});
+    let message = '';
+    if (profileUpdated && passwordUpdated) message = 'Profile details and password updated!';
+    else if (profileUpdated) message = 'Profile details updated!';
+    else if (passwordUpdated) message = 'Password updated!';
+    
+    if (message) {
+        setPersonalizationNotification({ type: 'success', message });
+    } else {
+        setPersonalizationNotification({ type: 'info', message: 'No changes were made to your profile.'});
     }
-
 
     setTimeout(() => setPersonalizationNotification(null), 5000);
     setIsUpdatingProfile(false);
@@ -137,13 +205,11 @@ const SettingsPage: React.FC = () => {
     <div className="container mx-auto">
       <h1 className="text-3xl font-bold mb-6 text-slate-800 dark:text-slate-100">Settings</h1>
       
-      {/* Notifications will appear here */}
       {fbNotification && <Alert type="success" message={fbNotification} onClose={() => setFbNotification(null)} className="mb-4"/>}
       {personalizationNotification && <Alert type={personalizationNotification.type} message={personalizationNotification.message} onClose={() => setPersonalizationNotification(null)} className="mb-4"/>}
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* Personalization Card - For All Users */}
         <Card title="Personalize Your Account" className="lg:col-span-1">
           <form onSubmit={handlePersonalizationSave} className="space-y-6">
             <div>
@@ -207,7 +273,6 @@ const SettingsPage: React.FC = () => {
           </form>
         </Card>
 
-        {/* Appearance Card - For All Users */}
         <Card title="Appearance" className="lg:col-span-1">
           <div className="space-y-3">
             <p className="text-sm text-slate-600 dark:text-slate-300">Choose your preferred theme:</p>
@@ -230,9 +295,8 @@ const SettingsPage: React.FC = () => {
           </div>
         </Card>
 
-        {/* Facebook Integration Card - Admin Only */}
         {currentUser?.role === UserRole.ADMIN && (
-          <Card title="Facebook Integration" className="lg:col-span-2"> {/* Takes full width if it's the only one in a row or spans across */}
+          <Card title="Facebook Integration" className="lg:col-span-2">
             <form onSubmit={handleSaveFbSettings} className="space-y-4">
               <Input
                 label="Facebook SDK URL"
@@ -242,20 +306,80 @@ const SettingsPage: React.FC = () => {
                 value={fbSettings.sdkUrl}
                 onChange={handleFbSettingsChange}
                 placeholder="e.g., https://connect.facebook.net/en_US/sdk.js"
+                disabled // SDK URL is not meant to be frequently changed by admin
+                title="This URL is typically fixed. Contact support if changes are needed."
+              />
+               <Input
+                label="Facebook App ID"
+                id="appId"
+                name="appId"
+                type="text"
+                value={fbSettings.appId}
+                onChange={handleFbSettingsChange}
+                placeholder="Your Facebook App ID (for SDK)"
+                required
               />
               <Input
-                label="Facebook Page ID"
+                label="Facebook Page ID (for Analytics)"
                 id="pageId"
                 name="pageId"
                 type="text"
                 value={fbSettings.pageId}
                 onChange={handleFbSettingsChange}
                 placeholder="Your Facebook Page ID"
+                required
               />
               <Button type="submit" variant="primary">Save Facebook Settings</Button>
             </form>
+             <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+                The App ID and Page ID are required for fetching Facebook analytics.
+                The SDK URL is generally fixed and used to load Facebook's JavaScript SDK.
+             </p>
           </Card>
         )}
+
+        <Card title="Manage AI Models Cache" className="lg:col-span-2">
+          {cacheNotification && <Alert type={cacheNotification.type} message={cacheNotification.message} onClose={() => setCacheNotification(null)} className="mb-4"/>}
+          <div className="my-4 flex items-center space-x-3">
+            <Button onClick={fetchCachedModels} variant="secondary" size="sm" isLoading={cacheLoading && !cachedModels.length} disabled={cacheLoading}>
+              <i className="fas fa-sync-alt mr-2"></i> Refresh List
+            </Button>
+            {cacheLoading && cachedModels.length > 0 && <LoadingSpinner size="sm" />}
+          </div>
+          
+          {cacheLoading && cachedModels.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6">
+              <LoadingSpinner size="md" />
+              <p className="mt-3 text-slate-500 dark:text-slate-400">Loading cached models...</p>
+            </div>
+          ) : !cacheLoading && cachedModels.length === 0 ? (
+            <p className="text-slate-500 dark:text-slate-400 py-4 text-center">
+              No WebLLM related models found in browser cache.
+              Models are cached automatically when you use AI features for the first time.
+            </p>
+          ) : (
+            <ul className="space-y-3 max-h-96 overflow-y-auto pr-2">
+              {cachedModels.map(modelName => (
+                <li key={modelName} className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg shadow-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                  <span className="text-sm text-slate-700 dark:text-slate-300 truncate mr-4 flex-grow" title={modelName}>{modelName}</span>
+                  <Button
+                    onClick={() => handleRemoveCachedModel(modelName)}
+                    variant="danger"
+                    size="sm"
+                    isLoading={cacheLoading} 
+                    disabled={cacheLoading}
+                    aria-label={`Remove ${modelName} from cache`}
+                    className="flex-shrink-0"
+                  >
+                    <i className="fas fa-trash-alt sm:mr-1"></i>
+                    <span className="hidden sm:inline">Remove</span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
       </div>
     </div>
   );
