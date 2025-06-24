@@ -1,7 +1,7 @@
 
 import React from 'react';
 
-interface CardProps {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   title?: string;
@@ -9,9 +9,9 @@ interface CardProps {
   actions?: React.ReactNode;
 }
 
-const Card: React.FC<CardProps> = ({ children, className = '', title, titleClassName = '', actions }) => {
+const Card: React.FC<CardProps> = ({ children, className = '', title, titleClassName = '', actions, ...rest }) => {
   return (
-    <div className={`bg-white dark:bg-slate-800 shadow-lg rounded-xl overflow-hidden ${className}`}>
+    <div className={`bg-white dark:bg-slate-800 shadow-lg rounded-xl overflow-hidden ${className}`} {...rest}>
       {(title || actions) && (
         <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
           {title && <h3 className={`text-lg font-semibold text-slate-800 dark:text-slate-100 ${titleClassName}`}>{title}</h3>}
@@ -26,4 +26,3 @@ const Card: React.FC<CardProps> = ({ children, className = '', title, titleClass
 };
 
 export default Card;
-    

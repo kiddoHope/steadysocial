@@ -9,17 +9,16 @@ import GenerationPage from './pages/GenerationPage';
 import SettingsPage from './pages/SettingsPage';
 import HumanResourcePage from './pages/HumanResourcePage';
 import NotFoundPage from './pages/NotFoundPage';
+import TermsPage from './pages/TermsPage'; 
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage'; 
+import AboutUsPage from './pages/AboutUsPage'; 
+import AnalyticsPage from './pages/AnalyticsPage'; 
+import FacebookChatsPage from './pages/FacebookChatsPage'; // Added FacebookChatsPage
 import Navbar from './components/layout/Navbar';
 import Sidebar from './components/layout/Sidebar';
-import ChatbotFAB from './components/chatbot/ChatbotFAB'; // Added
-import ChatWindow from './components/chatbot/ChatWindow'; // Added
-import { useChatbot } from './contexts/ChatbotContext'; // Added
-import TermsPage from './pages/TermsPage';
-import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
-import AboutUsPage from './pages/AboutUsPage';
-import AnalyticsPage from './pages/AnalyticsPage';
-// Removed useAI import as it's not directly used for UI changes here now.
-// Global loading state will be handled by components consuming useAI.
+import ChatbotFAB from './components/chatbot/ChatbotFAB'; 
+import ChatWindow from './components/chatbot/ChatWindow'; 
+import { useChatbot } from './contexts/ChatbotContext'; 
 
 interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
@@ -43,7 +42,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children 
   }
 
   if (allowedRoles && !allowedRoles.includes(currentUser.role)) {
-    // Redirect to dashboard if role not allowed, or to a specific "Access Denied" page
     return <Navigate to="/dashboard" replace />; 
   }
   
@@ -52,8 +50,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children 
 
 const App: React.FC = () => {
   const { theme } = useTheme();
-  const { currentUser, loading: authLoading } = useAuth(); // Renamed to avoid conflict if useAI had 'loading'
-  const { isChatOpen } = useChatbot(); // Added to access isChatOpen in App
+  const { currentUser, loading: authLoading } = useAuth();
+  const { isChatOpen } = useChatbot(); 
 
   React.useEffect(() => {
     if (theme === 'dark') {
@@ -63,7 +61,6 @@ const App: React.FC = () => {
     }
   }, [theme]);
 
-  // More robust initial loading state for auth
   if (authLoading && !sessionStorage.getItem('currentUser') && !localStorage.getItem('steadySocialAutoLoginUserId')) { 
     return (
       <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
@@ -77,7 +74,7 @@ const App: React.FC = () => {
       {currentUser && <Sidebar />}
       <div className="flex-1 flex flex-col overflow-hidden">
         {currentUser && <Navbar />}
-        <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 ${!currentUser ? 'h-screen' : ''}`}>
+        <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 ${!currentUser ? 'h-screen' : ''}`}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/terms" element={<TermsPage />} />
@@ -88,7 +85,8 @@ const App: React.FC = () => {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/generate" element={<ProtectedRoute allowedRoles={[UserRole.CREATIVE]}><GenerationPage /></ProtectedRoute>} />
-              <Route path="/analytics" element={<AnalyticsPage />} /> {/* Added Analytics Route */}
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/facebook-chats" element={<FacebookChatsPage />} /> {/* Added Facebook Chats Route */}
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/hr" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><HumanResourcePage /></ProtectedRoute>} />
             </Route>
@@ -97,7 +95,7 @@ const App: React.FC = () => {
           </Routes>
         </main>
       </div>
-      {currentUser && ( // Only show chatbot if user is logged in
+      {currentUser && ( 
         <>
           <ChatbotFAB />
           {isChatOpen && <ChatWindow />}

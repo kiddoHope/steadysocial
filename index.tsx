@@ -1,10 +1,12 @@
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { AIProvider } from './contexts/AIContext'; // Added AIProvider
+import { AIProvider } from './contexts/AIContext';
 import { ChatbotProvider } from './contexts/ChatbotContext'; // Added ChatbotProvider
+import { AnalyticsProvider } from './contexts/AnalyticsContext'; // Added AnalyticsProvider
 import { HashRouter } from 'react-router-dom';
 
 const rootElement = document.getElementById('root');
@@ -20,7 +22,9 @@ root.render(
         <AuthProvider>
           <AIProvider>
             <ChatbotProvider> {/* Added ChatbotProvider wrapper */}
-              <App />
+              <AnalyticsProvider> {/* Added AnalyticsProvider wrapper */}
+                <App />
+              </AnalyticsProvider>
             </ChatbotProvider>
           </AIProvider>
         </AuthProvider>

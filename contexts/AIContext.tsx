@@ -71,7 +71,7 @@ export const AIProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       {showLoader && (
         <div
           className={`
-            fixed top-6 right-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 
+            fixed top-10 right-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 
             rounded-lg shadow-xl p-4 w-full max-w-sm z-[9999]
             ${isExiting ? 'animate-slide-out-to-right' : 'animate-slide-in-from-right'}
           `}

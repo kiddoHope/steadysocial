@@ -13,7 +13,7 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, label }) => (
   <NavLink
     to={to}
     className={({ isActive }) => ( 
-      `flex items-center px-4 py-3 my-1 text-sm hover:bg-primary-500 hover:text-white dark:hover:bg-primary-700 rounded-lg transition-colors duration-150 ${
+      `flex items-center px-4 py-3 text-sm hover:bg-primary-500 hover:text-white dark:hover:bg-primary-700 rounded-lg transition-colors duration-150 ${
         isActive ? 'bg-primary-500 text-white dark:bg-primary-700' : 'text-slate-700 dark:text-slate-300'
       }`
     )}
@@ -33,7 +33,8 @@ const Sidebar: React.FC = () => {
         {currentUser?.role === UserRole.CREATIVE && (
           <NavItem to="/generate" icon="fa-magic" label="Content Canvas" /> 
         )}
-        <NavItem to="/analytics" icon="fa-chart-line" label="Analytics" /> {/* Added Analytics Link */}
+        <NavItem to="/analytics" icon="fa-chart-line" label="Analytics" />
+        <NavItem to="/facebook-chats" icon="fa-comments" label="Facebook Chats" /> {/* Added Facebook Chats Link */}
         <NavItem to="/settings" icon="fa-cog" label="Settings" />
         {currentUser?.role === UserRole.ADMIN && (
           <NavItem to="/hr" icon="fa-users-cog" label="Human Resources" />

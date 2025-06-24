@@ -83,9 +83,16 @@ export interface InitialIdea {
 }
 
 export interface FacebookSettings {
-  sdkUrl: string;
-  pageId: string;
-  appId: string; // Added appId for Facebook SDK initialization
+  sdkUrl: string; // URL for the FB SDK script
+  appId: string;  // Facebook App ID
+  pageId: string; // Selected Facebook Page ID (for analytics or specific actions)
+  messagingAppId?: string; // Optional: App ID for a separate messaging app
+}
+
+export interface FacebookPage {
+  id: string;
+  name: string;
+  access_token?: string; // Page access token, if available and needed
 }
 
 export type Theme = 'light' | 'dark';
@@ -117,4 +124,43 @@ export enum PostStatus {
   APPROVED = 'approved',
   REJECTED = 'rejected',
   POSTED_TO_FACEBOOK = 'posted_to_facebook',
+}
+
+// Types for Facebook Page Chats
+export interface FacebookParticipantData {
+  name: string;
+  email?: string; // May not always be available
+  id: string; // Page-Scoped ID (PSID) for this user with this page
+}
+
+export interface FacebookParticipant {
+  data: FacebookParticipantData[];
+}
+
+export interface FacebookMessageData {
+  id: string; // Message ID
+  created_time: string;
+  message?: string; // Text of the message
+  from: FacebookParticipantData; // Who sent this message (name, id)
+  // stickers, attachments, shares etc. can be added here if needed
+}
+
+export interface FacebookMessage {
+  id: string; // Message ID
+  created_time: string;
+  message?: string;
+  from: FacebookParticipantData;
+  // Potentially other fields like attachments, stickers
+}
+
+export interface FacebookConversation {
+  id: string; // Conversation ID (thread_id)
+  updated_time: string;
+  snippet?: string; // A short preview of the last message
+  unread_count: number;
+  participants: FacebookParticipant;
+  messages?: { // Optional, if fetched with conversation
+    data: FacebookMessageData[];
+  };
+  // Other fields like 'link', 'message_count' can be added
 }

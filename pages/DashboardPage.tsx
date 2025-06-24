@@ -1,25 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ContentCanvas, CanvasStatus, UserRole } from '../types';
-// These service functions are now ASYNCHRONOUS
+import { ContentCanvas, CanvasStatus, UserRole, FacebookPage, CanvasItem, FacebookSettings } from '../types';
 import { 
     getCanvases, 
     updateCanvasStatus as updateCanvasStatusService, 
     deleteCanvas as deleteCanvasService 
 } from '../services/postService';
+import { getFacebookSettings } from '../services/settingsService';
 import { useAuth } from '../contexts/AuthContext';
+import useFacebookSDK from '../hooks/useFacebookSDK';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
+import PostToFacebookModal from '../components/dashboard/PostToFacebookModal'; // Import the modal
+import LoadingSpinner from '../components/ui/LoadingSpinner';
 
 const CanvasDisplayCard: React.FC<{ 
   canvas: ContentCanvas; 
   onUpdateStatus: (canvasId: string, status: CanvasStatus, feedback?: string) => void; 
   onDelete: (canvasId: string) => void; 
+  onOpenPostModal: (canvas: ContentCanvas) => void; // Added for modal
   currentUserRole: UserRole | undefined;
   currentUserId: string | undefined;
-}> = ({ canvas, onUpdateStatus, onDelete, currentUserRole, currentUserId }) => {
+  isFacebookReady: boolean;
+}> = ({ canvas, onUpdateStatus, onDelete, onOpenPostModal, currentUserRole, currentUserId, isFacebookReady }) => {
   const isAdmin = currentUserRole === UserRole.ADMIN;
   const [adminFeedbackInput, setAdminFeedbackInput] = useState('');
 
@@ -64,7 +69,6 @@ const CanvasDisplayCard: React.FC<{
       </div>
       
       <div className="p-4 flex-grow flex flex-col">
-        {/* ++ FIX 2: This block is changed to show the first item's text as a summary ++ */}
         <div className="mb-3">
             <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Content Summary:</p>
             {canvas.items && canvas.items.length > 0 ? (
@@ -90,7 +94,6 @@ const CanvasDisplayCard: React.FC<{
         )}
 
         <div className="mt-auto pt-4 border-t border-slate-200 dark:border-slate-700 space-y-2">
-          {/* Admin actions */}
           {isAdmin && canvas.status === CanvasStatus.PENDING_REVIEW && (
             <>
               <Button onClick={handleApprove} variant="success" size="sm" className="w-full">Approve</Button>
@@ -106,18 +109,27 @@ const CanvasDisplayCard: React.FC<{
             </>
           )}
 
-          {/* Delete action */}
           {(isAdmin || (canvas.createdBy === currentUserId && (canvas.status === CanvasStatus.DRAFT || canvas.status === CanvasStatus.NEEDS_REVISION))) && (
              <Button onClick={handleDelete} variant="danger" size="sm" className="w-full mt-2">Delete Canvas</Button>
            )}
             
-            {/* View/Edit button */}
-            {!isAdmin && (
-              <a href={`#/generate?canvasId=${canvas.id}`} className="block mt-2">
-                <Button variant="secondary" size="sm" className="w-full">
-                  {canvas.status === CanvasStatus.DRAFT || (canvas.createdBy === currentUserId && canvas.status === CanvasStatus.NEEDS_REVISION) ? "Edit Canvas" : "View Canvas Details"}
-                </Button>
-              </a>
+            <a href={`#/generate?canvasId=${canvas.id}`} className="block mt-2">
+              <Button variant="secondary" size="sm" className="w-full">
+                {canvas.status === CanvasStatus.DRAFT || (canvas.createdBy === currentUserId && canvas.status === CanvasStatus.NEEDS_REVISION) ? "Edit Canvas" : "View Canvas Details"}
+              </Button>
+            </a>
+
+            {canvas.status === CanvasStatus.APPROVED && (
+              <Button 
+                onClick={() => onOpenPostModal(canvas)} 
+                variant="primary" 
+                size="sm" 
+                className="w-full mt-2"
+                disabled={!isFacebookReady}
+                title={!isFacebookReady ? "Connect to Facebook in Settings to enable posting" : "Post to Facebook"}
+              >
+                <i className="fab fa-facebook mr-2"></i> Post to Facebook
+              </Button>
             )}
         </div>
       </div>
@@ -130,19 +142,38 @@ const DashboardPage: React.FC = () => {
   const [canvases, setCanvases] = useState<ContentCanvas[]>([]);
   const [filter, setFilter] = useState<CanvasStatus | 'all'>('all');
   const { currentUser } = useAuth();
-  const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
+  
+  const [isPostModalOpen, setIsPostModalOpen] = useState(false);
+  const [selectedCanvasForPost, setSelectedCanvasForPost] = useState<ContentCanvas | null>(null);
+  const [isPostingToFacebook, setIsPostingToFacebook] = useState(false);
+  const [postToFacebookError, setPostToFacebookError] = useState<string | null>(null);
+  const [postToFacebookSuccess, setPostToFacebookSuccess] = useState<string | null>(null);
+  
+  const [fbSettings, setFbSettings] = useState<FacebookSettings | null>(null);
 
-  // ++ FIX 1: Make the data fetching ASYNCHRONOUS to work with IndexedDB ++
+  useEffect(() => {
+    setFbSettings(getFacebookSettings());
+  }, []);
+
+  const { isSdkInitialized, fbApi, error: sdkError, FB: fbInstance } = useFacebookSDK(
+    fbSettings?.appId, // Use main app ID for posting
+    fbSettings?.sdkUrl
+  );
+
+  const isFacebookReady = isSdkInitialized && !!fbInstance?.getUserID();
+
+
   const fetchCanvases = useCallback(async () => {
     try {
-        const allCanvases = await getCanvases(); // MUST 'await' the result from the service
+        const allCanvases = await getCanvases();
         if (currentUser?.role !== UserRole.ADMIN) {
             setCanvases(allCanvases.filter(c => 
                 c.createdBy === currentUser?.id ||
                 c.status === CanvasStatus.APPROVED
             ));
         } else {
-            setCanvases(allCanvases); // Admins see all
+            setCanvases(allCanvases);
         }
     } catch (error) {
         console.error("Failed to fetch canvases:", error);
@@ -151,16 +182,13 @@ const DashboardPage: React.FC = () => {
   }, [currentUser]);
 
   useEffect(() => {
-    // This is the correct way to call an async function inside useEffect
     fetchCanvases();
   }, [fetchCanvases]);
 
-  // ++ FIX 1: Make the update function ASYNCHRONOUS ++
   const handleUpdateStatus = async (canvasId: string, status: CanvasStatus, feedback?: string) => {
-    // MUST 'await' the result from the service
     const updatedCanvas = await updateCanvasStatusService(canvasId, status, currentUser?.id, feedback);
     if (updatedCanvas) {
-      fetchCanvases(); // Re-fetch the updated list
+      fetchCanvases();
       setNotification({type: 'success', message: `Canvas status updated to ${status.replace('_',' ')}.`});
     } else {
       setNotification({type: 'error', message: 'Failed to update canvas status.'});
@@ -168,14 +196,78 @@ const DashboardPage: React.FC = () => {
     setTimeout(() => setNotification(null), 3000);
   };
   
-  // ++ FIX 1: Make the delete function ASYNCHRONOUS ++
   const handleDeleteCanvas = async (canvasId: string) => {
-    // MUST 'await' the result from the service
     await deleteCanvasService(canvasId);
-    fetchCanvases(); // Re-fetch the updated list
+    fetchCanvases();
     setNotification({ type: 'success', message: 'Canvas deleted successfully.' });
     setTimeout(() => setNotification(null), 3000);
   };
+
+  const handleOpenPostModal = (canvas: ContentCanvas) => {
+    if (!fbSettings?.pageId) {
+      setNotification({ type: 'info', message: "Please select a Facebook Page in Settings before posting."});
+      return;
+    }
+    if (!isFacebookReady) {
+      setNotification({ type: 'info', message: "Please connect to Facebook with the Main App ID in Settings before posting."});
+      return;
+    }
+    setSelectedCanvasForPost(canvas);
+    setIsPostModalOpen(true);
+    setPostToFacebookError(null);
+    setPostToFacebookSuccess(null);
+  };
+
+  const handleConfirmPostToFacebook = async (
+    _selectedItem: CanvasItem, // Item might be used for more specific image/link logic in future
+    textToPost: string,
+    imageToUse?: string | null
+  ) => {
+    if (!fbApi || !fbSettings?.pageId || !isFacebookReady) {
+      setPostToFacebookError("Facebook connection not ready or Page ID not set.");
+      return;
+    }
+    setIsPostingToFacebook(true);
+    setPostToFacebookError(null);
+    setPostToFacebookSuccess(null);
+
+    try {
+      const accountsResponse = await fbApi<{data: FacebookPage[]}>('/me/accounts?fields=id,name,access_token');
+      const targetPage = accountsResponse.data.find(p => p.id === fbSettings.pageId);
+
+      if (!targetPage?.access_token) {
+        throw new Error("Page Access Token not found. Please ensure the page is managed by the connected user and permissions are granted.");
+      }
+      const pageAccessToken = targetPage.access_token;
+      
+      const postPayload: { message: string; link?: string; access_token: string } = {
+        message: textToPost,
+        access_token: pageAccessToken,
+      };
+
+      let imageNote = "";
+      if (imageToUse) {
+        if (imageToUse.startsWith('http://') || imageToUse.startsWith('https://')) {
+          postPayload.link = imageToUse;
+        } else {
+          // Base64 image, can't directly post to feed with a link.
+          // Consider photo upload endpoint for future or just post text.
+          imageNote = " (Image is local; posting text-only. For images, use a public URL or upload directly to Facebook).";
+        }
+      }
+
+      await fbApi(`/${fbSettings.pageId}/feed`, 'post', postPayload);
+      setPostToFacebookSuccess(`Successfully posted to Facebook page "${targetPage.name}"${imageNote}.`);
+      // Optionally close modal after a delay or let user close
+      // setTimeout(() => setIsPostModalOpen(false), 3000); 
+    } catch (err: any) {
+      console.error("Error posting to Facebook:", err);
+      setPostToFacebookError(`Failed to post: ${err.message}`);
+    } finally {
+      setIsPostingToFacebook(false);
+    }
+  };
+
 
   const filteredCanvases = canvases.filter(c => filter === 'all' || c.status === filter);
   
@@ -188,6 +280,11 @@ const DashboardPage: React.FC = () => {
     <div className="container mx-auto">
       <h1 className="text-3xl font-bold mb-6 text-slate-800 dark:text-slate-100">Content Canvas Dashboard</h1>
       {notification && <Alert type={notification.type} message={notification.message} onClose={() => setNotification(null)}/>}
+      {sdkError && <Alert type="error" message={`Facebook SDK Error: ${sdkError}. Posting features may be affected.`} className="mb-4"/>}
+      {!isFacebookReady && fbSettings?.appId && (
+         <Alert type="info" message="Facebook is not connected for the Main App ID. Please connect in Settings to enable posting features." className="mb-4"/>
+      )}
+
 
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <label htmlFor="statusFilter" className="text-sm font-medium text-slate-700 dark:text-slate-300">Filter by status:</label>
@@ -223,11 +320,24 @@ const DashboardPage: React.FC = () => {
               canvas={canvas} 
               onUpdateStatus={handleUpdateStatus} 
               onDelete={handleDeleteCanvas}
+              onOpenPostModal={handleOpenPostModal}
               currentUserRole={currentUser?.role}
               currentUserId={currentUser?.id}
+              isFacebookReady={isFacebookReady}
             />
           ))}
         </div>
+      )}
+      {selectedCanvasForPost && (
+        <PostToFacebookModal
+          isOpen={isPostModalOpen}
+          onClose={() => setIsPostModalOpen(false)}
+          canvas={selectedCanvasForPost}
+          onConfirmPost={handleConfirmPostToFacebook}
+          isPosting={isPostingToFacebook}
+          postError={postToFacebookError}
+          postSuccessMessage={postToFacebookSuccess}
+        />
       )}
     </div>
   );
