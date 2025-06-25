@@ -1,15 +1,28 @@
-
 export enum UserRole {
   ADMIN = 'admin',
   CREATIVE = 'creative',
 }
 
+export enum Endpoint {
+  USERS = '/users',
+  CANVASES = '/canvases',
+  FACEBOOK = '/facebook',
+  ANALYTICS = '/analytics',
+  SETTINGS = '/settings',
+  GENERATION = '/generation',
+  HR = '/hr',
+  WIP = '/wip', // Work-in-progress endpoint for Generation Page
+}
+
+
+
 export interface User {
   id: string;
   username: string;
   role: UserRole;
-  password?: string; // Only for creation/storage, not for client state
+  password?: string; // Optional: In-memory DB might store it, but API responses shouldn't include it.
   profilePictureUrl?: string; // Base64 string for the profile picture
+  theme?: Theme; // User's preferred theme
 }
 
 export enum CanvasStatus {
@@ -17,15 +30,14 @@ export enum CanvasStatus {
   PENDING_REVIEW = 'pending_review',
   NEEDS_REVISION = 'needs_revision',
   APPROVED = 'approved',
-  // Consider if individual items get a 'POSTED' status later
 }
 
 export enum SocialPlatform {
   General = "General Platform",
   Facebook = "Facebook",
   Instagram = "Instagram",
-  X = "X (formerly Twitter)", // Updated
-  Twitter = "Twitter (Legacy - use X)", // Kept for compatibility if needed, prefer X
+  X = "X (formerly Twitter)",
+  Twitter = "Twitter (Legacy - use X)",
   LinkedIn = "LinkedIn",
   TikTok = "TikTok"
 }
@@ -40,59 +52,75 @@ export enum CaptionTone {
   Inspirational = "Inspirational"
 }
 
-// Represents one core creative idea and its adaptations within a Canvas
-export interface CanvasItem {
-  id: string; // Unique within the canvas, e.g., item-timestamp-random
-  originalText: string;
-  imagePreview?: string | null; // Context image used for this item if specific
-  textFileContent?: string | null; // Context text file used if specific
-  adaptations: Partial<Record<SocialPlatform, { text: string }>>; // platform -> adapted text
-  notesForAdmin?: string; // Creative's notes for this specific item
-  // Optional: Storing base tone/platform could be useful for re-adaptation if needed
-  baseTone: CaptionTone;
-  basePlatformContext: SocialPlatform; // The general platform context used to generate this item
+// Work-in-progress state for the Generation Page
+export interface WIPState {
+  canvasTitle: string;
+  customPrompt: string;
+  platformContext: SocialPlatform;
+  tone: CaptionTone;
+  numberOfIdeas: number;
+  overallImagePreview: string | null; 
+  overallImageFile: File | null; // Transient, not "stored" in DB
+  overallTextFileContent: string | null;
+  overallTextFile: File | null; // Transient, not "stored" in DB
+  parsedRawItems: string[] | null; // Raw AI suggestions not yet turned into cards
+  activeCanvasIdForWIP: string | null; 
 }
 
-// The main Content Canvas
+export interface CanvasItem {
+  id: string;
+  originalText: string;
+  imagePreview?: string | null; 
+  textFileContent?: string | null;
+  adaptations: Partial<Record<SocialPlatform, { text: string }>>;
+  notesForAdmin?: string;
+  baseTone: CaptionTone;
+  basePlatformContext: SocialPlatform;
+}
+
 export interface ContentCanvas {
-  id: string; // Globally unique ID for the canvas
-  title?: string; // Optional title for the canvas (e.g., from prompt or user input)
+  id: string; 
+  title?: string; 
   items: CanvasItem[];
   status: CanvasStatus;
   
-  // Context for the entire canvas generation session
   overallCustomPrompt: string;
   overallTone: CaptionTone;
-  overallPlatformContext: SocialPlatform; // General platform context for initial ideas
-  overallImagePreview?: string | null; // Primary image associated with the canvas
-  overallTextFileContent?: string | null; // Primary text file associated with the canvas
+  overallPlatformContext: SocialPlatform; 
+  overallImagePreview?: string | null; 
+  overallTextFileContent?: string | null; 
 
-  createdBy: string; // User ID of the Creative
-  createdAt: number; // Timestamp
-  submittedAt?: number; // Timestamp when moved to PENDING_REVIEW
-  reviewedBy?: string; // User ID of the Admin
-  reviewedAt?: number; // Timestamp of last review action
-  adminFeedback?: string; // General feedback from Admin for the whole canvas if revision is needed
+  // For simulation, WIP associated with this canvas when fetched/saved
+  // When saving, the current WIPState (excluding File objects) can be stored here.
+  // When loading, this can re-populate the GenerationWIPContext.
+  wipStateSnapshot?: Omit<WIPState, 'overallImageFile' | 'overallTextFile' | 'activeCanvasIdForWIP'>;
+
+
+  createdBy: string; 
+  createdAt: number; 
+  submittedAt?: number; 
+  reviewedBy?: string; 
+  reviewedAt?: number; 
+  adminFeedback?: string; 
 }
 
 
-// This type might be used internally by useWebLLM before structuring into CanvasItem
 export interface InitialIdea { 
   id: string;
   text: string;
 }
 
 export interface FacebookSettings {
-  sdkUrl: string; // URL for the FB SDK script
-  appId: string;  // Facebook App ID
-  pageId: string; // Selected Facebook Page ID (for analytics or specific actions)
-  messagingAppId?: string; // Optional: App ID for a separate messaging app
+  sdkUrl: string; 
+  appId: string;  
+  pageId: string; 
+  messagingAppId?: string;
 }
 
 export interface FacebookPage {
   id: string;
   name: string;
-  access_token?: string; // Page access token, if available and needed
+  access_token?: string; 
 }
 
 export type Theme = 'light' | 'dark';
@@ -104,7 +132,7 @@ export interface Post {
   id: string;
   imagePreview?: string | null;
   caption: string;
-  status: string; // Was PostStatus, now string for compatibility during transition if needed
+  status: string; 
   generatedBy: string; 
   approvedBy?: string | null; 
   timestamp: number;
@@ -126,11 +154,10 @@ export enum PostStatus {
   POSTED_TO_FACEBOOK = 'posted_to_facebook',
 }
 
-// Types for Facebook Page Chats
 export interface FacebookParticipantData {
   name: string;
-  email?: string; // May not always be available
-  id: string; // Page-Scoped ID (PSID) for this user with this page
+  email?: string; 
+  id: string; 
 }
 
 export interface FacebookParticipant {
@@ -138,29 +165,101 @@ export interface FacebookParticipant {
 }
 
 export interface FacebookMessageData {
-  id: string; // Message ID
+  id: string; 
   created_time: string;
-  message?: string; // Text of the message
-  from: FacebookParticipantData; // Who sent this message (name, id)
-  // stickers, attachments, shares etc. can be added here if needed
+  message?: string; 
+  from: FacebookParticipantData;
 }
 
 export interface FacebookMessage {
-  id: string; // Message ID
+  id: string; 
   created_time: string;
   message?: string;
   from: FacebookParticipantData;
-  // Potentially other fields like attachments, stickers
 }
 
 export interface FacebookConversation {
-  id: string; // Conversation ID (thread_id)
+  id: string; 
   updated_time: string;
-  snippet?: string; // A short preview of the last message
+  snippet?: string; 
   unread_count: number;
   participants: FacebookParticipant;
-  messages?: { // Optional, if fetched with conversation
+  messages?: { 
     data: FacebookMessageData[];
   };
-  // Other fields like 'link', 'message_count' can be added
+}
+
+// Types for Facebook Analytics (moved from AnalyticsContext)
+export interface FBPageInfo {
+  name?: string;
+  fan_count?: number;
+  picture?: { data: { url: string } };
+}
+
+export interface FBInsightValue {
+  value: number | Record<string, number>;
+  end_time: string;
+}
+
+export interface FBInsightsData {
+  name: string;
+  period: string;
+  values: FBInsightValue[];
+  title: string;
+  description: string;
+  id: string;
+}
+
+export interface FBInsightsResponse {
+  data: FBInsightsData[];
+}
+
+export interface FBPostAttachmentMediaImage {
+  height: number;
+  src: string;
+  width: number;
+}
+
+export interface FBPostAttachmentMedia {
+  image: FBPostAttachmentMediaImage;
+}
+
+export interface FBPostAttachmentSubattachment {
+    media: FBPostAttachmentMedia;
+    type: string;
+}
+
+export interface FBPostAttachmentData {
+  media?: FBPostAttachmentMedia;
+  subattachments?: { data: FBPostAttachmentSubattachment[] };
+  type: string;
+  url?: string;
+}
+
+export interface FBPostAttachments {
+  data: FBPostAttachmentData[];
+}
+
+export interface FBPost {
+  id: string;
+  message?: string;
+  created_time: string;
+  permalink_url?: string;
+  insights?: {
+    data: Array<{
+      name: string;
+      period: string;
+      values: Array<{value: number}>;
+    }>;
+  };
+  attachments?: FBPostAttachments;
+}
+
+export interface FBPostsResponse {
+  data: FBPost[];
+  paging?: any;
+}
+
+export interface FBManagedPagesResponse {
+  data: FacebookPage[];
 }

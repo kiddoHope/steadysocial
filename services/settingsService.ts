@@ -1,34 +1,44 @@
 import { FacebookSettings } from '../types';
 
-const FB_SETTINGS_KEY = 'facebookSettings';
-const DEFAULT_FB_SDK_URL = 'https://connect.facebook.net/en_US/sdk.js';
-const DEFAULT_MESSAGING_APP_ID = '1084086590308098'; // Default messaging App ID
+const baseURL = "https://pilot.sgcsystems.com/api.php";
 
-export const getFacebookSettings = (): FacebookSettings => {
-  const storedSettings = localStorage.getItem(FB_SETTINGS_KEY);
-  const defaults: FacebookSettings = { 
-    sdkUrl: DEFAULT_FB_SDK_URL, 
-    appId: '', 
-    pageId: '', 
-    messagingAppId: DEFAULT_MESSAGING_APP_ID
-  };
-  if (storedSettings) {
-    const parsed = JSON.parse(storedSettings);
-    // Ensure all keys are present, merging with defaults
-    // If messagingAppId is not in storedSettings or is null/undefined, the default from `defaults` will be used.
-    return { 
-      ...defaults, 
-      ...parsed,
-      // Explicitly apply default for messagingAppId if parsed value is null or undefined
-      messagingAppId: parsed.messagingAppId !== undefined && parsed.messagingAppId !== null ? parsed.messagingAppId : DEFAULT_MESSAGING_APP_ID,
-    };
-  }
-  return defaults;
+// --- Configuration ---
+// IMPORTANT: Replace this URL with the actual path to your api.php file on your server.
+
+// --- Helper for API Requests ---
+// This helper can be shared across your API service files.
+const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
+    try {
+        const response = await fetch(`${baseURL}${path}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...options.headers,
+            },
+            ...options,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'An unknown API error occurred.' }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+
+        return await response.json() as T;
+    } catch (error) {
+        console.error('API Request Failed:', error);
+        throw error;
+    }
 };
 
-export const saveFacebookSettings = (settings: Partial<FacebookSettings>): void => {
-  // Merge with existing settings to only update provided fields
-  const currentSettings = getFacebookSettings();
-  const newSettings = { ...currentSettings, ...settings };
-  localStorage.setItem(FB_SETTINGS_KEY, JSON.stringify(newSettings));
+// --- Service Functions ---
+
+export const dbGetFacebookSettings = async (): Promise<FacebookSettings> => {
+    return apiRequest<FacebookSettings>('/settings/facebook');
+};
+
+export const dbSaveFacebookSettings = async (newSettings: Partial<FacebookSettings>): Promise<FacebookSettings> => {
+    return apiRequest<FacebookSettings>('/settings/facebook', {
+        method: 'PUT',
+        body: JSON.stringify(newSettings),
+    });
 };

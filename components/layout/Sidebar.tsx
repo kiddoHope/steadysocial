@@ -13,7 +13,7 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, label }) => (
   <NavLink
     to={to}
     className={({ isActive }) => ( 
-      `flex items-center px-4 py-3 text-sm hover:bg-primary-500 hover:text-white dark:hover:bg-primary-700 rounded-lg transition-colors duration-150 ${
+      `flex items-center px-4 py-3 my-1 text-sm hover:bg-primary-500 hover:text-white dark:hover:bg-primary-700 rounded-lg transition-colors duration-150 ${
         isActive ? 'bg-primary-500 text-white dark:bg-primary-700' : 'text-slate-700 dark:text-slate-300'
       }`
     )}

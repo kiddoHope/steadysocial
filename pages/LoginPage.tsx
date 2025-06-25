@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,8 +11,7 @@ const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, loading } = useAuth(); // Use loading state from context
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/dashboard';
@@ -21,18 +19,21 @@ const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setIsLoading(true);
-    const success = await login(username, password);
-    setIsLoading(false);
-    if (success) {
-      navigate(from, { replace: true });
-    } else {
-      setError('Invalid username or password.');
+    // Loading state is now managed by AuthContext, triggered by calling login()
+    try {
+      const success = await login(username, password);
+      if (success) {
+        navigate(from, { replace: true });
+      } else {
+        setError('Invalid username or password.');
+      }
+    } catch (err: any) {
+       setError(err.message || 'An unexpected error occurred during login.');
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center dark:from-primary-800 dark:to-secondary-800 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-500 to-secondary-500 dark:from-primary-800 dark:to-secondary-800 p-4">
       <Card className="w-full max-w-md">
         <div className="text-center mb-8">
           <i className="fas fa-feather-alt text-5xl text-primary-500 dark:text-primary-400 mb-2"></i>
@@ -53,6 +54,7 @@ const LoginPage: React.FC = () => {
             placeholder="Enter your username"
             required
             autoFocus
+            disabled={loading}
           />
           <Input
             id="password"
@@ -62,9 +64,10 @@ const LoginPage: React.FC = () => {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter your password"
             required
+            disabled={loading}
           />
-          <Button type="submit" className="w-full" isLoading={isLoading} size="lg">
-            {isLoading ? 'Signing In...' : 'Sign In'}
+          <Button type="submit" className="w-full" isLoading={loading} size="lg" disabled={loading}>
+            {loading ? 'Signing In...' : 'Sign In'}
           </Button>
         </form>
         <p className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400">

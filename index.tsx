@@ -5,9 +5,11 @@ import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AIProvider } from './contexts/AIContext';
-import { ChatbotProvider } from './contexts/ChatbotContext'; // Added ChatbotProvider
-import { AnalyticsProvider } from './contexts/AnalyticsContext'; // Added AnalyticsProvider
-import { HashRouter } from 'react-router-dom';
+import { ChatbotProvider } from './contexts/ChatbotContext';
+import { AnalyticsProvider } from './contexts/AnalyticsContext';
+import { CanvasProvider } from './contexts/CanvasContext'; // Added CanvasProvider
+import { GenerationWIPProvider } from './contexts/GenerationWIPContext'; // Added GenerationWIPProvider
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -17,18 +19,22 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <HashRouter>
-      <ThemeProvider>
-        <AuthProvider>
+    <BrowserRouter>
+      <AuthProvider> {/* AuthProvider now wraps ThemeProvider */}
+        <ThemeProvider>
           <AIProvider>
-            <ChatbotProvider> {/* Added ChatbotProvider wrapper */}
-              <AnalyticsProvider> {/* Added AnalyticsProvider wrapper */}
-                <App />
-              </AnalyticsProvider>
-            </ChatbotProvider>
+            <CanvasProvider>
+              <GenerationWIPProvider>
+                <ChatbotProvider>
+                  <AnalyticsProvider>
+                    <App />
+                  </AnalyticsProvider>
+                </ChatbotProvider>
+              </GenerationWIPProvider>
+            </CanvasProvider>
           </AIProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </HashRouter>
+        </ThemeProvider>
+      </AuthProvider>
+    </BrowserRouter>
   </React.StrictMode>
 );

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FacebookSettings,
@@ -7,8 +6,8 @@ import {
   FacebookMessage,
   FacebookParticipantData
 } from '../types';
-import { useAuth } from '../contexts/AuthContext';
-import { getFacebookSettings } from '../services/settingsService';
+// Removed useAuth as currentUser is not directly used for page logic, only for display (can be added back if needed)
+import { dbGetFacebookSettings } from '../services/settingsService'; // Use direct DB call
 import useFacebookSDK from '../hooks/useFacebookSDK';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Alert from '../components/ui/Alert';
@@ -18,8 +17,8 @@ import Input from '../components/ui/Input';
 import Card from '../components/ui/Card';
 
 const FacebookChatsPage: React.FC = () => {
-  const { currentUser } = useAuth();
   const [fbSettings, setFbSettings] = useState<FacebookSettings | null>(null);
+  const [isLoadingFbSettings, setIsLoadingFbSettings] = useState(true);
   const [fbPages, setFbPages] = useState<FacebookPage[]>([]);
   const [selectedPage, setSelectedPage] = useState<FacebookPage | null>(null);
   const [conversations, setConversations] = useState<FacebookConversation[]>([]);
@@ -36,38 +35,56 @@ const FacebookChatsPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setFbSettings(getFacebookSettings());
+    const loadSettings = async () => {
+        setIsLoadingFbSettings(true);
+        try {
+            const settings = await dbGetFacebookSettings();
+            setFbSettings(settings);
+             if (!settings.appId) { // Check for main App ID used for chats/pages
+                setError("Facebook App ID is not configured. Please set it in Settings to manage chats.");
+            }
+        } catch (err) {
+            console.error("Failed to load FB settings for Chats:", err);
+            setError("Could not load Facebook settings for chats.");
+        } finally {
+            setIsLoadingFbSettings(false);
+        }
+    };
+    loadSettings();
   }, []);
 
   const { isSdkInitialized, fbApi, error: sdkError, FB: fbInstance } = useFacebookSDK(
-    fbSettings?.appId,
+    fbSettings?.appId, // Use main App ID for page/chat functionalities
     fbSettings?.sdkUrl
   );
 
-  // Fetch managed pages
   useEffect(() => {
-    if (isSdkInitialized && fbApi && fbInstance?.getUserID()) { // Check if user is connected
+    if (isSdkInitialized && fbApi && fbInstance?.getUserID() && fbSettings?.appId) {
       setIsLoadingPages(true);
       setError(null);
       fbApi<{ data: FacebookPage[] }>('/me/accounts?fields=id,name,access_token')
         .then(response => {
           setFbPages(response.data || []);
-          if (response.data && response.data.length > 0) {
-            // Optionally auto-select first page or last used page
-            // setSelectedPage(response.data[0]); 
+          // Auto-select page if one was stored in fbSettings (e.g. default page)
+          if (fbSettings.pageId && response.data) {
+              const defaultPage = response.data.find(p => p.id === fbSettings.pageId);
+              if (defaultPage) setSelectedPage(defaultPage);
           }
         })
         .catch(err => {
           console.error('Error fetching Facebook pages:', err);
-          setError(`Failed to fetch Facebook pages: ${err.message}. Ensure you are logged in via Settings.`);
+          setError(`Failed to fetch Facebook pages: ${err.message}. Ensure you are logged in via Settings with the Main App ID.`);
         })
         .finally(() => setIsLoadingPages(false));
-    } else if (isSdkInitialized && !fbInstance?.getUserID()){
-        setError("Please connect to Facebook via the Settings page to manage chats.");
+    } else if (isSdkInitialized && !fbInstance?.getUserID() && fbSettings?.appId){
+        setError("Please connect to Facebook via the Settings page (using the Main App ID) to manage chats.");
+    } else if (fbSettings && !fbSettings.appId && !isLoadingFbSettings) {
+        // This is handled by initial load check, but as a safeguard:
+        if (!error) setError("Facebook App ID for pages/chats is not configured in Settings.");
     }
-  }, [isSdkInitialized, fbApi, fbInstance]);
+  }, [isSdkInitialized, fbApi, fbInstance, fbSettings, error]); // Added fbSettings and error to dependencies
 
-  // Fetch conversations when a page is selected
+
   const fetchConversations = useCallback(async (page: FacebookPage) => {
     if (!fbApi || !page.access_token) {
       setError('Facebook API not ready or Page Access Token missing.');
@@ -80,7 +97,7 @@ const FacebookChatsPage: React.FC = () => {
     setMessages([]);
     try {
       const response = await fbApi<{ data: FacebookConversation[] }>(
-        `/${page.id}/conversations?fields=participants,snippet,unread_count,updated_time,messages.limit(1){message,from,created_time}&access_token=${page.access_token}`
+        `/${page.id}/conversations?fields=participants,snippet,unread_count,updated_time&access_token=${page.access_token}`
       );
       setConversations(response.data || []);
     } catch (err: any) {
@@ -97,7 +114,6 @@ const FacebookChatsPage: React.FC = () => {
     }
   }, [selectedPage, fetchConversations]);
 
-  // Fetch messages when a conversation is selected
   const fetchMessages = useCallback(async (conversationId: string) => {
     if (!fbApi || !selectedPage?.access_token) {
       setError('Facebook API not ready or Page Access Token missing.');
@@ -145,27 +161,24 @@ const FacebookChatsPage: React.FC = () => {
     setIsSendingMessage(true);
     setError(null);
     try {
-      // Using /{page_id}/messages endpoint as per user's image
       await fbApi(
-        `/${selectedPage.id}/messages`, // Endpoint: uses Page ID
+        `/${selectedPage.id}/messages`,
         'post',
         {
-          recipient: { id: recipientParticipant.id }, // PSID of the user
+          recipient: { id: recipientParticipant.id },
           messaging_type: "RESPONSE",
           message: { text: newMessageText },
           access_token: selectedPage.access_token,
         }
       );
       setNewMessageText('');
-      // Optimistically add message or refetch
       const sentMessage: FacebookMessage = {
         id: `temp-${Date.now()}`,
         created_time: new Date().toISOString(),
         message: newMessageText,
-        from: { id: selectedPage.id, name: selectedPage.name } // Assuming message is from the page
+        from: { id: selectedPage.id, name: selectedPage.name || "My Page" } 
       };
       setMessages(prev => [...prev, sentMessage]);
-      // Refetch messages for accuracy, especially to get the real ID and confirm delivery
       setTimeout(() => fetchMessages(selectedConversation.id), 1500); 
     } catch (err: any) {
       console.error('Error sending message:', err);
@@ -184,21 +197,22 @@ const FacebookChatsPage: React.FC = () => {
     return otherParticipant?.name || 'Unknown User';
   };
 
-  if (!fbSettings) {
-    return <div className="p-4"><LoadingSpinner /><p>Loading settings...</p></div>;
+  if (isLoadingFbSettings) {
+    return <div className="p-4 flex items-center justify-center h-64"><LoadingSpinner size="lg"/><p className="ml-3">Loading settings...</p></div>;
   }
-  if (!fbSettings.appId) {
-    return <Alert type="warning" message="Facebook App ID is not configured. Please set it in Settings." />;
+  if (!fbSettings?.appId && !error) { // If no App ID and no other error message is already set
+     return <Alert type="warning" message="Facebook App ID for pages/chats is not configured. Please set it in Settings." />;
   }
-  if (sdkError) {
-     return <Alert type="error" message={`Facebook SDK Error: ${sdkError}. Please check settings and ensure you are connected via the Settings page.`} />;
+  if (sdkError && !error) { // If SDK error and no other error message
+     return <Alert type="error" message={`Facebook SDK Error: ${sdkError}. Please check settings and ensure you are connected via Settings (Main App ID).`} />;
   }
-   if (!isSdkInitialized && fbSettings.appId) {
-    return <div className="p-4"><LoadingSpinner /><p>Initializing Facebook SDK...</p></div>;
+   if (!isSdkInitialized && fbSettings?.appId && !error) { // If SDK not init, App ID exists, and no other error
+    return <div className="p-4 flex items-center justify-center h-64"><LoadingSpinner size="lg"/><p className="ml-3">Initializing Facebook SDK...</p></div>;
   }
 
+
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--navbar-height,64px)-2rem)] animate-fadeIn"> {/* Adjust for navbar height and padding */}
+    <div className="flex flex-col h-[calc(100vh-var(--navbar-height,64px)-2rem)] animate-fadeIn">
       <header className="mb-6">
         <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Facebook Page Chats</h1>
       </header>
@@ -213,12 +227,12 @@ const FacebookChatsPage: React.FC = () => {
           onChange={(e) => {
             const page = fbPages.find(p => p.id === e.target.value);
             setSelectedPage(page || null);
-            setSelectedConversation(null); // Reset conversation when page changes
+            setSelectedConversation(null); 
             setMessages([]);
           }}
           options={fbPages.map(p => ({ value: p.id, label: p.name }))}
           placeholder="-- Select a Page --"
-          disabled={isLoadingPages || fbPages.length === 0}
+          disabled={isLoadingPages || fbPages.length === 0 || !isSdkInitialized || !fbInstance?.getUserID()}
           wrapperClassName="max-w-sm"
         />
         {isLoadingPages && <LoadingSpinner size="sm" className="mt-2" />}
@@ -226,7 +240,6 @@ const FacebookChatsPage: React.FC = () => {
 
       {selectedPage && (
         <div className="flex-grow flex border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden shadow-md">
-          {/* Conversations List Panel */}
           <div className="w-1/3 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-slate-50 dark:bg-slate-800">
             <div className="p-3 border-b border-slate-200 dark:border-slate-600">
               <h2 className="font-semibold text-slate-700 dark:text-slate-200">Conversations ({conversations.length})</h2>
@@ -241,9 +254,7 @@ const FacebookChatsPage: React.FC = () => {
                   <li key={conv.id}
                       className={`p-3 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer border-b border-slate-200 dark:border-slate-600 ${selectedConversation?.id === conv.id ? 'bg-primary-100 dark:bg-primary-700/50' : ''}`}
                       onClick={() => setSelectedConversation(conv)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => e.key === 'Enter' && setSelectedConversation(conv)}
+                      role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setSelectedConversation(conv)}
                       aria-pressed={selectedConversation?.id === conv.id}
                   >
                     <div className="flex justify-between items-center">
@@ -264,7 +275,6 @@ const FacebookChatsPage: React.FC = () => {
             )}
           </div>
 
-          {/* Messages Panel */}
           <div className="w-2/3 flex flex-col bg-white dark:bg-slate-800/70">
             {selectedConversation ? (
               <>
@@ -312,17 +322,22 @@ const FacebookChatsPage: React.FC = () => {
               </>
             ) : (
               <div className="flex-grow flex items-center justify-center">
-                <p className="text-slate-500 dark:text-slate-400">Select a conversation to view messages.</p>
+                 {isLoadingPages || isLoadingFbSettings ? 
+                    <LoadingSpinner /> : 
+                    <p className="text-slate-500 dark:text-slate-400">
+                        {fbPages.length > 0 ? "Select a conversation to view messages." : "No pages available or user not connected."}
+                    </p>
+                }
               </div>
             )}
           </div>
         </div>
       )}
-       {!selectedPage && !isLoadingPages && fbPages.length > 0 && (
+       {!selectedPage && !isLoadingPages && !isLoadingFbSettings && fbPages.length > 0 && !error && (
             <Card className="mt-4"><p className="text-center p-8 text-slate-500 dark:text-slate-400">Please select a Facebook Page to view its chats.</p></Card>
         )}
-        {!selectedPage && !isLoadingPages && fbPages.length === 0 && isSdkInitialized && (
-             <Card className="mt-4"><p className="text-center p-8 text-slate-500 dark:text-slate-400">No Facebook Pages found. Ensure your account manages pages and you have granted `pages_show_list` permission.</p></Card>
+        {!selectedPage && !isLoadingPages && !isLoadingFbSettings && fbPages.length === 0 && isSdkInitialized && !error && (
+             <Card className="mt-4"><p className="text-center p-8 text-slate-500 dark:text-slate-400">No Facebook Pages found. Ensure your account manages pages and you have granted `pages_show_list` permission via Settings (Main App ID).</p></Card>
         )}
 
     </div>

@@ -13,7 +13,7 @@ import TermsPage from './pages/TermsPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage'; 
 import AboutUsPage from './pages/AboutUsPage'; 
 import AnalyticsPage from './pages/AnalyticsPage'; 
-import FacebookChatsPage from './pages/FacebookChatsPage'; // Added FacebookChatsPage
+import FacebookChatsPage from './pages/FacebookChatsPage';
 import Navbar from './components/layout/Navbar';
 import Sidebar from './components/layout/Sidebar';
 import ChatbotFAB from './components/chatbot/ChatbotFAB'; 
@@ -26,10 +26,10 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children }) => {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, initialAuthCheckComplete } = useAuth(); // Use initialAuthCheckComplete
   const location = useLocation();
 
-  if (loading) {
+  if (!initialAuthCheckComplete) { // Wait for initial auth check
     return (
       <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
         <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-primary-500"></div>
@@ -49,22 +49,27 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children 
 };
 
 const App: React.FC = () => {
-  const { theme } = useTheme();
-  const { currentUser, loading: authLoading } = useAuth();
+  const { theme, isLoadingTheme } = useTheme();
+  const { currentUser, initialAuthCheckComplete } = useAuth(); // Use initialAuthCheckComplete
   const { isChatOpen } = useChatbot(); 
 
   React.useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+    // Theme application is now handled within ThemeContext based on its loading state
+    if (!isLoadingTheme) {
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
     }
-  }, [theme]);
+  }, [theme, isLoadingTheme]);
 
-  if (authLoading && !sessionStorage.getItem('currentUser') && !localStorage.getItem('steadySocialAutoLoginUserId')) { 
+  // Show a global loader until initial auth status and theme are resolved
+  if (!initialAuthCheckComplete || isLoadingTheme) { 
     return (
       <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
         <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-primary-500"></div>
+        <p className="ml-4 text-slate-700 dark:text-slate-200">Initializing Application...</p>
       </div>
     );
   }
@@ -86,7 +91,7 @@ const App: React.FC = () => {
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/generate" element={<ProtectedRoute allowedRoles={[UserRole.CREATIVE]}><GenerationPage /></ProtectedRoute>} />
               <Route path="/analytics" element={<AnalyticsPage />} />
-              <Route path="/facebook-chats" element={<FacebookChatsPage />} /> {/* Added Facebook Chats Route */}
+              <Route path="/facebook-chats" element={<FacebookChatsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/hr" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><HumanResourcePage /></ProtectedRoute>} />
             </Route>

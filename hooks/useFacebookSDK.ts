@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 declare global {
@@ -32,22 +33,19 @@ const useFacebookSDK = (appId?: string, sdkUrl?: string): FacebookSDKHook => {
     }
 
     const initializeFacebookSdk = (currentFbAppId: string) => {
-      console.log(`FB.init called for App ID: ${currentFbAppId}, Version: v22.0`);
       window.FB.init({
         appId: currentFbAppId,
         cookie: true,
         xfbml: true,
-        version: 'v22.0',
+        version: 'v23.0', // Updated API version
         autoLogAppEvents: true,
       });
       setFbInstance(window.FB);
       setIsSdkInitialized(true);
       currentAppIdRef.current = currentFbAppId; // Update ref to current initialized App ID
-      console.log(`Facebook SDK initialized for App ID: ${currentFbAppId}`);
     };
 
     if (window.FB) { // SDK script is loaded
-      console.log(`FB SDK already detected. Current target App ID: ${appId}, Previously initialized App ID: ${currentAppIdRef.current}`);
       setFbInstance(window.FB); // Ensure fbInstance is set
       setIsSdkLoaded(true);
       if (appId !== currentAppIdRef.current || !isSdkInitialized) {
@@ -70,28 +68,22 @@ const useFacebookSDK = (appId?: string, sdkUrl?: string): FacebookSDKHook => {
     // If script tag exists but window.FB is not yet ready
     if (document.getElementById('facebook-jssdk')) {
         console.log("Facebook SDK script tag exists, waiting for fbAsyncInit.");
-        // fbAsyncInit will handle the initialization.
-        // It's important that fbAsyncInit uses the LATEST appId prop if it fires after appId changes.
-        // This is tricky if fbAsyncInit is set once. We need it to be dynamic.
-        // So, we'll redefine fbAsyncInit each time appId/sdkUrl changes and script isn't loaded.
     }
 
     window.fbAsyncInit = () => {
       try {
-        // Use the appId from the closure of this useEffect instance
-        console.log(`fbAsyncInit called. Target App ID: ${appId}`);
-        if (!appId) { // Safety check if appId became undefined before fbAsyncInit ran
+        if (!appId) { 
             console.error("fbAsyncInit called but App ID is undefined.");
             setError("Cannot initialize SDK: App ID became undefined.");
             return;
         }
         initializeFacebookSdk(appId);
-        setIsSdkLoaded(true); // Set loaded here as script is now fully processed
+        setIsSdkLoaded(true); 
       } catch (e: any) {
         console.error("Error initializing Facebook SDK via fbAsyncInit:", e);
         setError(`Failed to initialize Facebook SDK: ${e.message}`);
         setIsSdkInitialized(false);
-        setIsSdkLoaded(true); // Script loaded, but init failed
+        setIsSdkLoaded(true); 
       }
     };
 
@@ -108,14 +100,12 @@ const useFacebookSDK = (appId?: string, sdkUrl?: string): FacebookSDKHook => {
       setIsSdkInitialized(false);
       currentAppIdRef.current = undefined;
     };
-    console.log(`Appending Facebook SDK script for App ID: ${appId}, URL: ${sdkUrl}`);
     document.head.appendChild(script);
 
     return () => {
-      // Cleanup of global fbAsyncInit is complex if multiple instances try to set it.
-      // Usually, SDK script remains loaded.
+      // Cleanup
     };
-  }, [appId, sdkUrl, isSdkInitialized]); // Added isSdkInitialized to re-check if it somehow got false
+  }, [appId, sdkUrl, isSdkInitialized]); 
 
   const fbApi = useCallback(
     async <T>(path: string, method: 'get' | 'post' | 'delete' = 'get', params: Record<string, any> = {}): Promise<T> => {

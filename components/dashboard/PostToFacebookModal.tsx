@@ -1,15 +1,17 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { ContentCanvas, CanvasItem, SocialPlatform } from '../../types';
 import Button from '../ui/Button';
 import Select from '../ui/Select';
 import Alert from '../ui/Alert';
 import Card from '../ui/Card';
+import Input from '../ui/Input'; // Import Input for file upload
 
 interface PostToFacebookModalProps {
   isOpen: boolean;
   onClose: () => void;
   canvas: ContentCanvas | null;
-  onConfirmPost: (selectedItem: CanvasItem, textToPost: string, imageToUse?: string | null) => Promise<void>;
+  onConfirmPost: (selectedItem: CanvasItem, textToPost: string, imageToUse?: string | null, newImageFile?: File | null) => Promise<void>;
   isPosting: boolean;
   postError: string | null;
   postSuccessMessage: string | null;
@@ -26,31 +28,36 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
 }) => {
   const [selectedItemId, setSelectedItemId] = useState<string>('');
   const [textToPost, setTextToPost] = useState('');
+  const [userSelectedRetryFile, setUserSelectedRetryFile] = useState<File | null>(null);
 
   const selectedItem = useMemo(() => {
     return canvas?.items.find(item => item.id === selectedItemId) || null;
   }, [canvas, selectedItemId]);
 
   useEffect(() => {
-    if (canvas && canvas.items.length > 0) {
-      const initialItem = canvas.items[0];
-      setSelectedItemId(initialItem.id);
-      const fbAdaptation = initialItem.adaptations[SocialPlatform.Facebook]?.text;
-      setTextToPost(fbAdaptation || initialItem.originalText);
-    } else {
-      setSelectedItemId('');
-      setTextToPost('');
+    if (isOpen) {
+        setUserSelectedRetryFile(null); // Reset retry file when modal opens
+        if (canvas && canvas.items.length > 0) {
+            const initialItem = canvas.items[0];
+            setSelectedItemId(initialItem.id);
+            const fbAdaptation = initialItem.adaptations[SocialPlatform.Facebook]?.text;
+            setTextToPost(fbAdaptation || initialItem.originalText);
+        } else {
+            setSelectedItemId('');
+            setTextToPost('');
+        }
     }
   }, [canvas, isOpen]); // Reset when canvas changes or modal opens
 
   useEffect(() => {
-    if (selectedItem) {
+    if (selectedItem && isOpen) { // Only update text if modal is open and item changes
       const fbAdaptation = selectedItem.adaptations[SocialPlatform.Facebook]?.text;
       setTextToPost(fbAdaptation || selectedItem.originalText);
-    } else {
+      // setUserSelectedRetryFile(null); // Do not reset retry file on item change, only on open/canvas change
+    } else if (!selectedItem && isOpen) {
       setTextToPost('');
     }
-  }, [selectedItem]);
+  }, [selectedItem, isOpen]);
 
   if (!isOpen || !canvas) return null;
 
@@ -64,7 +71,7 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
 
   const handleSubmit = () => {
     if (selectedItem) {
-      onConfirmPost(selectedItem, textToPost, canvas.overallImagePreview);
+      onConfirmPost(selectedItem, textToPost, canvas.overallImagePreview, userSelectedRetryFile);
     }
   };
 
@@ -72,6 +79,9 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
     value: item.id,
     label: `Item: ${item.originalText.substring(0, 50)}...`,
   }));
+
+  const isBase64Image = canvas.overallImagePreview && canvas.overallImagePreview.startsWith('data:image');
+  const showRetryImageUpload = postError && postError.includes("(#324)");
 
   return (
     <div
@@ -88,7 +98,8 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
         actions={<Button onClick={onClose} variant="secondary" size="sm" aria-label="Close modal"><i className="fas fa-times"></i></Button>}
       >
         <div id="post-to-facebook-modal-title" className="sr-only">Post to Facebook Dialog</div>
-        {postError && <Alert type="error" message={postError} className="mb-4" />}
+        {postError && !showRetryImageUpload && <Alert type="error" message={postError} className="mb-4" />}
+        {/* Specific error message for #324 is handled by the retry UI below */}
         {postSuccessMessage && <Alert type="success" message={postSuccessMessage} className="mb-4" />}
 
         <div className="space-y-4">
@@ -118,21 +129,58 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
             </p>
           </div>
 
-          {canvas.overallImagePreview && (
+          {canvas.overallImagePreview && !showRetryImageUpload && ( // Hide original image preview if retry is shown
             <div>
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Image to Post:</p>
-              <img src={canvas.overallImagePreview} alt="Canvas Preview" className="rounded-md max-h-40 w-auto shadow border border-slate-200 dark:border-slate-700" />
+              <div className='h-10 w-full overflow-hidden rounded-md border border-slate-300 dark:border-slate-600 my-1'>
+                <img src={canvas.overallImagePreview} alt="Canvas Preview" className="rounded-md h-auto w-full shadow border border-slate-200 dark:border-slate-700" />
+              </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                {canvas.overallImagePreview.startsWith('http') 
-                  ? "This image will be posted as a link." 
-                  : "This image is a local preview (base64). Text-only post will be made to Facebook. For images, upload them directly to Facebook or use a URL."
+                {isBase64Image
+                  ? "This local image preview will be uploaded and attached to your post."
+                  : canvas.overallImagePreview.startsWith('http')
+                  ? "This image will be posted as a link."
+                  : "Image format unrecognized for direct upload; if it's a URL, it will be posted as a link."
                 }
               </p>
             </div>
           )}
-          {!canvas.overallImagePreview && (
+          {!canvas.overallImagePreview && !showRetryImageUpload && (
             <p className="text-sm text-slate-500 dark:text-slate-400">No image associated with this canvas. Text-only post will be made.</p>
           )}
+
+          {showRetryImageUpload && (
+            <div className="mt-4 p-3 border border-dashed border-red-500 dark:border-red-700 rounded-md bg-red-50 dark:bg-red-900/30">
+              <Alert type="error" message={postError || "Failed to post original image (#324)."} className="mb-2"/>
+              <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">
+                It seems there was an issue with the original image. You can try uploading a new one.
+              </p>
+              <Input
+                type="file"
+                accept="image/*"
+                label="Upload New Image for Retry"
+                onChange={(event) => {
+                  const target = event.target as HTMLInputElement;
+                  if (target.files && target.files[0]) {
+                    setUserSelectedRetryFile(target.files[0]);
+                  } else {
+                    setUserSelectedRetryFile(null);
+                  }
+                }}
+                className="text-sm dark:bg-slate-700"
+                wrapperClassName="!mb-1"
+                disabled={isPosting}
+                id="retryImageUpload"
+              />
+              {userSelectedRetryFile && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Selected for retry: {userSelectedRetryFile.name}</p>}
+               {!userSelectedRetryFile && (
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    If no new image is selected, an attempt will be made with the original image (if any) or as text-only.
+                </p>
+                )}
+            </div>
+          )}
+
 
           <div className="flex justify-end space-x-3 mt-6">
             <Button onClick={onClose} variant="secondary" disabled={isPosting}>
@@ -144,7 +192,7 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
               isLoading={isPosting}
               disabled={isPosting || !selectedItem || !textToPost.trim()}
             >
-              {isPosting ? 'Posting...' : 'Confirm & Post to Facebook'}
+              {isPosting ? 'Posting...' : (showRetryImageUpload && userSelectedRetryFile ? 'Retry with New Image' : 'Confirm & Post to Facebook')}
             </Button>
           </div>
         </div>

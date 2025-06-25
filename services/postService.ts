@@ -1,105 +1,16 @@
-import { ContentCanvas, CanvasItem, CanvasStatus, SocialPlatform } from '../types';
-import { 
-    getAllCanvasesDB, 
-    getCanvasDB, 
-    saveCanvasDB, 
-    deleteCanvasDB 
-} from '../utils/db'; // Import our new DB functions
+// Most of the functionality previously in this file is now managed by CanvasContext.
+// This file can be significantly reduced or removed if CanvasContext directly handles localStorage.
+// For now, we'll keep the key here as a reference or if the context wants to import it.
 
-// --- Public Service Functions ---
+export const CANVAS_STORAGE_KEY = 'contentCanvases';
 
-// Get all canvases, sorted by newest first
-export const getCanvases = async (): Promise<ContentCanvas[]> => {
-    return await getAllCanvasesDB();
-};
+// Example: If CanvasContext needed a utility to get initial data, it could be here.
+// However, the current CanvasContext implementation handles this internally.
+// export const getInitialCanvasesFromStorage = (): ContentCanvas[] => {
+//   const storedCanvases = localStorage.getItem(CANVAS_STORAGE_KEY);
+//   return storedCanvases ? JSON.parse(storedCanvases) : [];
+// };
 
-export const getCanvasById = async (canvasId: string): Promise<ContentCanvas | undefined> => {
-    return await getCanvasDB(canvasId);
-};
-
-export const createCanvas = async (
-    canvasData: Omit<ContentCanvas, 'id' | 'items' | 'status' | 'createdAt'>, 
-    initialItems: CanvasItem[]
-): Promise<ContentCanvas> => {
-    const newCanvas: ContentCanvas = {
-        ...canvasData,
-        id: `canvas-${Date.now()}`,
-        items: initialItems,
-        status: CanvasStatus.DRAFT,
-        createdAt: Date.now(),
-    };
-    await saveCanvasDB(newCanvas);
-    return newCanvas;
-};
-
-export const updateCanvas = async (updatedCanvas: ContentCanvas): Promise<ContentCanvas> => {
-    await saveCanvasDB(updatedCanvas);
-    return updatedCanvas;
-};
-
-export const updateCanvasStatus = async (
-    canvasId: string, 
-    status: CanvasStatus, 
-    adminId?: string, 
-    adminFeedback?: string
-): Promise<ContentCanvas | undefined> => {
-    const canvas = await getCanvasDB(canvasId);
-    if (canvas) {
-        canvas.status = status;
-        canvas.reviewedAt = Date.now();
-        if (adminId) {
-            canvas.reviewedBy = adminId;
-        }
-        if (status === CanvasStatus.NEEDS_REVISION && adminFeedback) {
-            canvas.adminFeedback = adminFeedback;
-        }
-        if (status === CanvasStatus.PENDING_REVIEW) {
-            canvas.submittedAt = Date.now();
-        }
-        await saveCanvasDB(canvas);
-        return canvas;
-    }
-    return undefined;
-};
-
-export const addOrUpdateCanvasItemAdaptation = async (
-  canvasId: string, 
-  itemId: string, 
-  platform: SocialPlatform, 
-  adaptedText: string
-): Promise<ContentCanvas | undefined> => {
-    const canvas = await getCanvasDB(canvasId);
-    if (canvas) {
-        const itemIndex = canvas.items.findIndex(item => item.id === itemId);
-        if (itemIndex !== -1) {
-            if (!canvas.items[itemIndex].adaptations) {
-                canvas.items[itemIndex].adaptations = {};
-            }
-            canvas.items[itemIndex].adaptations[platform] = { text: adaptedText };
-            await saveCanvasDB(canvas);
-            return canvas;
-        }
-    }
-    return undefined;
-};
-
-export const updateCanvasItemNotes = async (
-    canvasId: string, 
-    itemId: string, 
-    notes: string
-): Promise<ContentCanvas | undefined> => {
-    const canvas = await getCanvasDB(canvasId);
-    if (canvas) {
-        const itemIndex = canvas.items.findIndex(item => item.id === itemId);
-        if (itemIndex !== -1) {
-            canvas.items[itemIndex].notesForAdmin = notes;
-            await saveCanvasDB(canvas);
-            return canvas;
-        }
-    }
-    return undefined;
-};
-
-export const deleteCanvas = async (canvasId: string): Promise<void> => {
-    await deleteCanvasDB(canvasId);
-};
+// All other functions like getCanvases, saveCanvases, createCanvas, updateCanvas, etc.,
+// are effectively superseded by the methods provided by useCanvas() hook from CanvasContext.
+// Components should use the context for all canvas data management.
