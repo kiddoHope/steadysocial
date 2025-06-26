@@ -336,7 +336,10 @@ const GenerationPage: React.FC = () => {
         textFileContent: textFileForAdapt ?? null
       });
       const updatedCanvas = await addOrUpdateAdaptationInContext(activeCanvas.id, item.id, targetPlatform, adaptedText);
-      if (updatedCanvas) setActiveCanvas(updatedCanvas); 
+      if (updatedCanvas){
+        setActiveCanvas(updatedCanvas);
+        // window.location.reload(); // Reload to ensure WIP state is in sync with updated canvas
+      }
       else setSystemNotification({ type: 'error', message: `Failed to save adaptation.` }); 
     } catch (err: unknown) { 
       setSystemNotification({ type: 'error', message: `Failed to adapt item: ${err instanceof Error ? err.message : String(err)}` }); 
@@ -371,6 +374,8 @@ const GenerationPage: React.FC = () => {
         wipStateSnapshot: currentWipSnapshot, // Save current WIP with the canvas
     };
 
+    console.log(canvasToSubmit);
+
     try {
         const savedCanvas = await updateCanvasInContext(canvasToSubmit);
         if (!savedCanvas) { 
@@ -380,6 +385,8 @@ const GenerationPage: React.FC = () => {
         }
 
         const updatedStatusCanvas = await updateCanvasStatusInContext(savedCanvas.id, CanvasStatus.PENDING_REVIEW, currentUser.id);
+        console.log(updatedStatusCanvas);
+        
         if (updatedStatusCanvas) {
           setActiveCanvas(updatedStatusCanvas);
           initializeWIPFromCanvas(updatedStatusCanvas); // Re-initialize WIP from the submitted canvas state
@@ -562,7 +569,7 @@ const GenerationPage: React.FC = () => {
             {activeCanvas && !isPageLoading && (
               <Card title={`Working on Canvas: "${wipState.canvasTitle || activeCanvas.title || 'Untitled'}"`}
                     titleClassName={activeCanvas.status === CanvasStatus.APPROVED ? 'text-green-600 dark:text-green-400' : activeCanvas.status === CanvasStatus.PENDING_REVIEW ? 'text-yellow-600 dark:text-yellow-400' : activeCanvas.status === CanvasStatus.NEEDS_REVISION ? 'text-orange-600 dark:text-orange-400' : ''}
-                    actions={<span className={`px-3 py-1 text-xs font-semibold rounded-full text-white ${activeCanvas.status === CanvasStatus.DRAFT ? 'bg-slate-500' : activeCanvas.status === CanvasStatus.PENDING_REVIEW ? 'bg-yellow-500' : activeCanvas.status === CanvasStatus.NEEDS_REVISION ? 'bg-orange-500' : activeCanvas.status === CanvasStatus.APPROVED ? 'bg-green-500' : 'bg-gray-500'}`}>{activeCanvas.status.replace('_', ' ').toUpperCase()}</span>}
+                    actions={<span className={`px-3 py-1 text-xs font-semibold rounded-full text-white ${activeCanvas.status === CanvasStatus.DRAFT ? 'bg-slate-500' : activeCanvas.status === CanvasStatus.PENDING_REVIEW ? 'bg-yellow-500' : activeCanvas.status === CanvasStatus.NEEDS_REVISION ? 'bg-orange-500' : activeCanvas.status === CanvasStatus.APPROVED ? 'bg-green-500' : 'bg-gray-500'}`}>{activeCanvas.status?.replace('_', ' ').toUpperCase()}</span>}
               >
                 {activeCanvas.status === CanvasStatus.NEEDS_REVISION && activeCanvas.adminFeedback && (
                   <Alert type="warning" message={`Admin Feedback: ${activeCanvas.adminFeedback}`} className="mb-4"/>
@@ -641,7 +648,7 @@ const GenerationPage: React.FC = () => {
                         )
                       ))}
                       
-                       <Input
+                       {/* <Input
                           label="Notes for Admin (optional)"
                           id={`notes-${item.id}`}
                           type="textarea"
@@ -650,8 +657,8 @@ const GenerationPage: React.FC = () => {
                           onChange={(e) => handleItemNotesChange(item.id, e.target.value)}
                           placeholder="Add notes for this specific item..."
                           className="mt-3 text-sm"
-                          disabled={itemEditingDisabled || isPageLoading}
-                        />
+                          // disabled={itemEditingDisabled || isPageLoading}
+                        /> */}
                     </Card>
                   ))}
                 </div>

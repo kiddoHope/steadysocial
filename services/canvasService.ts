@@ -2,7 +2,7 @@ import { ContentCanvas, CanvasItem, CanvasStatus, SocialPlatform, WIPState } fro
 
 // --- Configuration ---
 // IMPORTANT: Replace this URL with the actual path to your api.php file on your server.
-const API_BASE_URL = 'https://pilot.sgcsystems.com/api.php'; 
+const API_BASE_URL = 'https://pilot.sgcsystems.com/canvasAPI.php'; 
 
 
 // --- Helper for API Requests ---

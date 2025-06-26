@@ -36,7 +36,7 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-        setUserSelectedRetryFile(null); // Reset retry file when modal opens
+        setUserSelectedRetryFile(null); 
         if (canvas && canvas.items.length > 0) {
             const initialItem = canvas.items[0];
             setSelectedItemId(initialItem.id);
@@ -47,13 +47,12 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
             setTextToPost('');
         }
     }
-  }, [canvas, isOpen]); // Reset when canvas changes or modal opens
+  }, [canvas, isOpen]); 
 
   useEffect(() => {
-    if (selectedItem && isOpen) { // Only update text if modal is open and item changes
+    if (selectedItem && isOpen) { 
       const fbAdaptation = selectedItem.adaptations[SocialPlatform.Facebook]?.text;
       setTextToPost(fbAdaptation || selectedItem.originalText);
-      // setUserSelectedRetryFile(null); // Do not reset retry file on item change, only on open/canvas change
     } else if (!selectedItem && isOpen) {
       setTextToPost('');
     }
@@ -81,7 +80,12 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
   }));
 
   const isBase64Image = canvas.overallImagePreview && canvas.overallImagePreview.startsWith('data:image');
-  const showRetryImageUpload = postError && postError.includes("(#324)");
+  // Condition for showing the retry image upload section
+  const showRetryImageUpload = postError && 
+    (postError.toLowerCase().includes("failed to upload") || 
+     postError.toLowerCase().includes("custom hosting") ||
+     postError.toLowerCase().includes("invalid file input") ||
+     postError.toLowerCase().includes("image format for upload"));
 
   return (
     <div
@@ -98,8 +102,7 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
         actions={<Button onClick={onClose} variant="secondary" size="sm" aria-label="Close modal"><i className="fas fa-times"></i></Button>}
       >
         <div id="post-to-facebook-modal-title" className="sr-only">Post to Facebook Dialog</div>
-        {postError && !showRetryImageUpload && <Alert type="error" message={postError} className="mb-4" />}
-        {/* Specific error message for #324 is handled by the retry UI below */}
+        {postError && !showRetryImageUpload && <Alert type="error" message={postError} onClose={onClose} className="mb-4" />}
         {postSuccessMessage && <Alert type="success" message={postSuccessMessage} className="mb-4" />}
 
         <div className="space-y-4">
@@ -129,18 +132,16 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
             </p>
           </div>
 
-          {canvas.overallImagePreview && !showRetryImageUpload && ( // Hide original image preview if retry is shown
+          {canvas.overallImagePreview && !showRetryImageUpload && ( 
             <div>
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Image to Post:</p>
-              <div className='h-10 w-full overflow-hidden rounded-md border border-slate-300 dark:border-slate-600 my-1'>
-                <img src={canvas.overallImagePreview} alt="Canvas Preview" className="rounded-md h-auto w-full shadow border border-slate-200 dark:border-slate-700" />
-              </div>
+              <img src={canvas.overallImagePreview} alt="Canvas Preview" className="rounded-md max-h-40 w-auto shadow border border-slate-200 dark:border-slate-700" />
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 {isBase64Image
-                  ? "This local image preview will be uploaded and attached to your post."
+                  ? "This image will be uploaded to custom hosting and linked."
                   : canvas.overallImagePreview.startsWith('http')
-                  ? "This image will be posted as a link."
-                  : "Image format unrecognized for direct upload; if it's a URL, it will be posted as a link."
+                  ? "This image URL will be used directly as a link."
+                  : "Image format unrecognized. It may not be posted."
                 }
               </p>
             </div>
@@ -151,9 +152,9 @@ const PostToFacebookModal: React.FC<PostToFacebookModalProps> = ({
 
           {showRetryImageUpload && (
             <div className="mt-4 p-3 border border-dashed border-red-500 dark:border-red-700 rounded-md bg-red-50 dark:bg-red-900/30">
-              <Alert type="error" message={postError || "Failed to post original image (#324)."} className="mb-2"/>
+              <Alert type="error" message={postError || "Failed to process the original image."} className="mb-2"/>
               <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">
-                It seems there was an issue with the original image. You can try uploading a new one.
+                It seems there was an issue with the image. You can try uploading a new one to be hosted.
               </p>
               <Input
                 type="file"

@@ -1,7 +1,7 @@
 import { User, UserRole, Theme } from '../types';
 
 // --- Configuration ---
-const API_BASE_URL = 'https://pilot.sgcsystems.com/api.php'; 
+const API_BASE_URL = 'https://pilot.sgcsystems.com/userAPI.php'; 
 const JWT_STORAGE_KEY = 'user_auth_token';
 
 // --- Helper for API Requests ---

@@ -99,6 +99,8 @@ export const CanvasProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setCanvases(prevCanvases => prevCanvases.map(c => c.id === updatedCanvas.id ? updatedCanvas : c));
       }
       return updatedCanvas;
+    } catch (error) {
+      console.error(`Failed to update canvas ${updatedCanvasData.id}:`, error); // Log error for debugging
     } finally {
       setIsLoadingCanvases(false);
     }

@@ -12,6 +12,7 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import PostToFacebookModal from '../components/dashboard/PostToFacebookModal';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import { Link } from 'react-router-dom';
 
 
 const base64ToBlob = async (base64Data: string): Promise<{ blob: Blob, mimeType: string, fileName: string } | null> => {
@@ -108,7 +109,7 @@ const CanvasDisplayCard: React.FC<{
                 {canvas.title || 'Untitled Canvas'}
             </h3>
             <span className={`px-2 py-0.5 text-xs text-white rounded-full border border-white/50`}>
-                {canvas.status.replace('_', ' ').toUpperCase()}
+                {canvas.status?.replace('_', ' ').toUpperCase()}
             </span>
         </div>
         <p className="text-xs text-white/80 mt-1">Created: {new Date(canvas.createdAt).toLocaleDateString()}</p>
@@ -161,11 +162,11 @@ const CanvasDisplayCard: React.FC<{
              <Button onClick={handleDelete} variant="danger" size="sm" className="w-full mt-2" disabled={isProcessing} isLoading={isProcessing}>Delete Canvas</Button>
            )}
             
-            <a href={`/generate?canvasId=${canvas.id}`} className="block mt-2">
+            <Link to={`/generate?canvasId=${canvas.id}`} className="block mt-2">
               <Button variant="secondary" size="sm" className="w-full" disabled={isProcessing}>
                 {canvas.status === CanvasStatus.DRAFT || (canvas.createdBy === currentUserId && canvas.status === CanvasStatus.NEEDS_REVISION) ? "Edit Canvas" : "View Canvas Details"}
               </Button>
-            </a>
+            </Link>
 
             {canvas.status === CanvasStatus.APPROVED && (
               <Button 
@@ -260,7 +261,7 @@ const DashboardPage: React.FC = () => {
     try {
       const updatedCanvas = await updateCanvasStatusInContext(canvasId, status, currentUser?.id, feedback);
       if (updatedCanvas) {
-        setNotification({type: 'success', message: `Canvas status updated to ${status.replace('_',' ')}.`});
+        setNotification({type: 'success', message: `Canvas status updated to ${status?.replace('_',' ')}.`});
       } else {
         setNotification({type: 'error', message: 'Failed to update canvas status.'});
       }
@@ -496,11 +497,11 @@ const DashboardPage: React.FC = () => {
           disabled={operationInProgress}
         />
          {currentUser?.role === UserRole.CREATIVE && (
-             <a href="#/generate" className="ml-auto">
+             <Link to="/generate" className="ml-auto">
                  <Button variant="primary" disabled={operationInProgress}>
                      <i className="fas fa-plus mr-2"></i> Create New Canvas
                  </Button>
-            </a>
+            </Link>
          )}
       </div>
 
@@ -508,7 +509,7 @@ const DashboardPage: React.FC = () => {
         <Card>
           <p className="text-center text-slate-500 dark:text-slate-400 py-10">
             No canvases found matching your criteria.
-            {currentUser?.role === UserRole.CREATIVE && <span className="block mt-2">Try <a href="#/generate" className="text-primary-500 hover:underline">creating a new canvas</a>!</span>}
+            {currentUser?.role === UserRole.CREATIVE && <span className="block mt-2">Try <Link to="/generate" className="text-primary-500 hover:underline">creating a new canvas</Link> here!</span>}
           </p>
         </Card>
       ) : (
