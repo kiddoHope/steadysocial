@@ -204,6 +204,11 @@ const GenerationPage: React.FC = () => {
                         setActiveCanvas(canvasToLoad);
                         initializeWIPFromCanvas(canvasToLoad); // Initialize WIP from loaded canvas (including its wipStateSnapshot)
                         setSystemNotification({ type: 'info', message: `Loaded canvas: "${canvasToLoad.title || 'Untitled'}".` });
+                        console.log("Loaded canvas:", canvasToLoad);
+                        setInterval(() => {
+                          window.location.reload(); // Reload to ensure WIP state is in sync with loaded canvas
+                        }, 1000,[canvasToLoad.id]); // Keep the canvas ID in sync with WIP
+                        
                     } else {
                         setSystemNotification({ type: 'error', message: `Canvas with ID "${canvasIdFromUrl}" not found. Starting fresh.` });
                         handleStartOver();
@@ -374,8 +379,6 @@ const GenerationPage: React.FC = () => {
         wipStateSnapshot: currentWipSnapshot, // Save current WIP with the canvas
     };
 
-    console.log(canvasToSubmit);
-
     try {
         const savedCanvas = await updateCanvasInContext(canvasToSubmit);
         if (!savedCanvas) { 
@@ -385,7 +388,6 @@ const GenerationPage: React.FC = () => {
         }
 
         const updatedStatusCanvas = await updateCanvasStatusInContext(savedCanvas.id, CanvasStatus.PENDING_REVIEW, currentUser.id);
-        console.log(updatedStatusCanvas);
         
         if (updatedStatusCanvas) {
           setActiveCanvas(updatedStatusCanvas);
@@ -445,6 +447,7 @@ const GenerationPage: React.FC = () => {
   
   const platformOptionsForAdaptation = AVAILABLE_PLATFORMS.filter(p => p !== SocialPlatform.General);
 
+  
   const controlsGloballyDisabled =
     isPageLoading || isLoadingCanvases || isSubmittingCanvas ||
     !creativeModelLoaded || 

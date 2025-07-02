@@ -36,4 +36,4 @@ export const WEBLLM_SELECTED_MODEL = "Mistral-7B-Instruct-v0.3-q4f32_1-MLC"; // 
 export const WEBLLM_CREATIVE_MODEL = "Hermes-3-Llama-3.2-3B-q4f32_1-MLC"; 
 
 // Model for chatbot interactions
-export const WEBLLM_CHATBOT_MODEL = "stablelm-2-zephyr-1_6b-q4f16_1-MLC";
+export const WEBLLM_CHATBOT_MODEL = "RedPajama-INCITE-Chat-3B-v1-q4f32_1-MLC-1k";
