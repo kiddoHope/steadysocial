@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Alert from '../components/ui/Alert';
 import { APP_NAME, APP_TAGLINE } from '../constants';
+import SignupModal from '../components/auth/SignupModal';
 
 const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -15,6 +16,7 @@ const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/dashboard';
+  const [isSignupModalOpen, setIsSignupModalOpen] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,14 +68,34 @@ const LoginPage: React.FC = () => {
             required
             disabled={loading}
           />
-          <Button type="submit" className="w-full" isLoading={loading} size="lg" disabled={loading}>
+          <div className="flex justify-between items-center text-sm -mt-4">
+            <Link to="/verify-email" className="font-medium text-primary-600 hover:underline dark:text-primary-400">
+              Verify your account
+            </Link>
+            <Link to="/forgot-password" className="font-medium text-primary-600 hover:underline dark:text-primary-400">
+              Forgot Password?
+            </Link>
+          </div>
+          <Button type="submit" className="w-full !mt-6" isLoading={loading} size="lg" disabled={loading}>
             {loading ? 'Signing In...' : 'Sign In'}
           </Button>
         </form>
-        <p className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400">
-          Demo users: admin/password or creative/password
-        </p>
+        <div className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400 space-y-2">
+            <p>
+                Don't have an account?{' '}
+                <button
+                onClick={() => setIsSignupModalOpen(true)}
+                className="font-medium text-primary-600 hover:underline dark:text-primary-400"
+                >
+                Sign Up
+                </button>
+            </p>
+            <p className="text-xs">
+                (Or use demo users: admin/password or creative/password)
+            </p>
+        </div>
       </Card>
+      <SignupModal isOpen={isSignupModalOpen} onClose={() => setIsSignupModalOpen(false)} />
     </div>
   );
 };

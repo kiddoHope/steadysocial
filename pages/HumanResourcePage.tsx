@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth, UserRole } from '../contexts/AuthContext';
 import { User } from '../types'; // Keep User type, Omit<User, 'password'> is handled by context
@@ -26,6 +25,7 @@ const UserRow: React.FC<{user: Omit<User, 'password'>, onRoleChange: (userId: st
   return (
     <tr className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
       <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-300">{user.username}</td>
+      <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-300">{user.email}</td>
       <td className="py-3 px-4 text-sm">
         <Select
           value={selectedRole}
@@ -54,7 +54,7 @@ const UserRow: React.FC<{user: Omit<User, 'password'>, onRoleChange: (userId: st
 
 const HumanResourcePage: React.FC = () => {
   const { users, addUser, updateUserRole, loading, fetchUsers } = useAuth();
-  const [newUser, setNewUser] = useState({ username: '', password_param: '', role: UserRole.CREATIVE });
+  const [newUser, setNewUser] = useState({ username: '', password_param: '', email: '', role: UserRole.CREATIVE });
   const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [isUpdatingRole, setIsUpdatingRole] = useState<string | null>(null); // Store ID of user being updated
@@ -69,16 +69,16 @@ const HumanResourcePage: React.FC = () => {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUser.username || !newUser.password_param) {
-      setNotification({ type: 'error', message: 'Username and password are required.' });
+    if (!newUser.username || !newUser.password_param || !newUser.email) {
+      setNotification({ type: 'error', message: 'Username, email, and password are required.' });
       return;
     }
     setIsAddingUser(true);
     setNotification(null);
     try {
-      await addUser(newUser); 
-      setNotification({ type: 'success', message: `User ${newUser.username} added successfully.` });
-      setNewUser({ username: '', password_param: '', role: UserRole.CREATIVE }); 
+      await addUser({ ...newUser, role: newUser.role as UserRole }); 
+      setNotification({ type: 'success', message: `User ${newUser.username} added successfully. They must verify their email before logging in.` });
+      setNewUser({ username: '', password_param: '', email: '', role: UserRole.CREATIVE }); 
     } catch (error: any) {
       setNotification({ type: 'error', message: error.message || 'Failed to add user.' });
     } finally {
@@ -122,6 +122,16 @@ const HumanResourcePage: React.FC = () => {
                 disabled={isAddingUser}
               />
               <Input
+                label="Email"
+                id="email"
+                name="email"
+                type="email"
+                value={newUser.email}
+                onChange={handleInputChange}
+                required
+                disabled={isAddingUser}
+              />
+              <Input
                 label="Password"
                 id="password_param" // Ensure name matches state key
                 name="password_param" // Ensure name matches state key
@@ -160,6 +170,7 @@ const HumanResourcePage: React.FC = () => {
                   <thead className="bg-slate-100 dark:bg-slate-700">
                     <tr>
                       <th className="py-3 px-4 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Username</th>
+                      <th className="py-3 px-4 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Email</th>
                       <th className="py-3 px-4 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Role</th>
                       <th className="py-3 px-4 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Actions</th>
                     </tr>

@@ -18,8 +18,10 @@ export enum Endpoint {
 
 export interface User {
   id: string;
+  userId: string;
   username: string;
   role: UserRole;
+  email: string;
   password?: string; // Optional: In-memory DB might store it, but API responses shouldn't include it.
   profilePictureUrl?: string; // Base64 string for the profile picture
   theme?: Theme; // User's preferred theme
@@ -50,6 +52,25 @@ export enum CaptionTone {
   Urgent = "Urgent",
   Playful = "Playful",
   Inspirational = "Inspirational"
+}
+
+// User state interface
+export interface ResetPasswordPayload {
+  email: string;
+  code: string;
+  password: string;
+}
+
+// Define payload for verifying reset code
+export interface VerifyResetCodePayload {
+    email: string;
+    code: string;
+}
+
+// Define payload for the new verify function
+export interface VerifyCodePayload {
+    email: string;
+    verificationCode: string;
 }
 
 // Work-in-progress state for the Generation Page

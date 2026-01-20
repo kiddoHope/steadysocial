@@ -29,8 +29,6 @@ export const CanvasProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setIsLoadingCanvases(true);
     try {
       const fetchedCanvases = await canvasService.dbFetchCanvases();
-      console.log(fetchedCanvases);
-      
       setCanvases(fetchedCanvases);
     } catch (error) {
       console.error("Failed to load canvases:", error);

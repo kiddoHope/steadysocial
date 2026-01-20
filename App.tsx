@@ -19,6 +19,10 @@ import Sidebar from './components/layout/Sidebar';
 import ChatbotFAB from './components/chatbot/ChatbotFAB'; 
 import ChatWindow from './components/chatbot/ChatWindow'; 
 import { useChatbot } from './contexts/ChatbotContext'; 
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPassword';
+import VerifyEmailPage from './pages/VerifyEmailPage'; // Import the new page
+import LandingPage from './pages/Landing';
 
 interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
@@ -79,15 +83,18 @@ const App: React.FC = () => {
       {currentUser && <Sidebar />}
       <div className="flex-1 flex flex-col overflow-hidden">
         {currentUser && <Navbar />}
-        <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 ${!currentUser ? 'h-screen' : ''}`}>
+        <main className={`flex-1 overflow-x-hidden overflow-y-auto ${!currentUser ? 'h-screen' : ''}`}>
           <Routes>
+            <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPolicyPage />} />
             <Route path="/about" element={<AboutUsPage />} />
             
             <Route element={<ProtectedRoute />}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/generate" element={<ProtectedRoute allowedRoles={[UserRole.CREATIVE]}><GenerationPage /></ProtectedRoute>} />
               <Route path="/analytics" element={<AnalyticsPage />} />

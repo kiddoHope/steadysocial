@@ -172,119 +172,119 @@ const useWebLLM = () => {
       .trim();
   };
 
-  useEffect(() => {
-    const blob = new Blob([captionWorkerScript], { type: 'application/javascript' });
-    const workerScriptURL = URL.createObjectURL(blob);
+  // useEffect(() => {
+  //   const blob = new Blob([captionWorkerScript], { type: 'application/javascript' });
+  //   const workerScriptURL = URL.createObjectURL(blob);
 
-    // Initialize Creative Worker
-    const newCreativeWorker = new Worker(workerScriptURL, { type: 'module' });
-    creativeWorkerRef.current = newCreativeWorker;
-    newCreativeWorker.onmessage = (event: MessageEvent<any>) => {
-      const { type, payload } = event.data as { type: string; payload: any };
-      switch (type) {
-        case 'progress':
-          setCreativeModelProgress((payload as WorkerMessagePayload).text || 'Processing...');
-          break;
-        case 'init-done':
-          setCreativeModelLoaded(true);
-          setCreativeModelProgress((payload as WorkerMessagePayload).message || 'Creative model ready.');
-          break;
-        case 'text-result':
-          {
-            const { result, requestType: reqType, originalItemId, targetPlatform, originalTitle } = payload as TextResultPayload;
-            if (reqType === 'suggestPrompt') setSuggestAIPrompt(result);
-            else setRawAIResponse(result);
-            setRequestType(reqType);
+  //   // Initialize Creative Worker
+  //   const newCreativeWorker = new Worker(workerScriptURL, { type: 'module' });
+  //   creativeWorkerRef.current = newCreativeWorker;
+  //   newCreativeWorker.onmessage = (event: MessageEvent<any>) => {
+  //     const { type, payload } = event.data as { type: string; payload: any };
+  //     switch (type) {
+  //       case 'progress':
+  //         setCreativeModelProgress((payload as WorkerMessagePayload).text || 'Processing...');
+  //         break;
+  //       case 'init-done':
+  //         setCreativeModelLoaded(true);
+  //         setCreativeModelProgress((payload as WorkerMessagePayload).message || 'Creative model ready.');
+  //         break;
+  //       case 'text-result':
+  //         {
+  //           const { result, requestType: reqType, originalItemId, targetPlatform, originalTitle } = payload as TextResultPayload;
+  //           if (reqType === 'suggestPrompt') setSuggestAIPrompt(result);
+  //           else setRawAIResponse(result);
+  //           setRequestType(reqType);
 
-            let requestId = '';
-            if (reqType === 'initialCanvasItems') requestId = 'initialCanvasItems';
-            else if (reqType === 'adaptCanvasItem' && originalItemId && targetPlatform) requestId = `adapt-${originalItemId}-${targetPlatform}`;
-            else if (reqType === 'suggestPrompt' && originalTitle) requestId = `suggestPrompt-${originalTitle}`;
+  //           let requestId = '';
+  //           if (reqType === 'initialCanvasItems') requestId = 'initialCanvasItems';
+  //           else if (reqType === 'adaptCanvasItem' && originalItemId && targetPlatform) requestId = `adapt-${originalItemId}-${targetPlatform}`;
+  //           else if (reqType === 'suggestPrompt' && originalTitle) requestId = `suggestPrompt-${originalTitle}`;
             
-            if (requestId && pendingCreativeRequests.current[requestId]) {
-              pendingCreativeRequests.current[requestId].resolve(result);
-              delete pendingCreativeRequests.current[requestId];
-            }
+  //           if (requestId && pendingCreativeRequests.current[requestId]) {
+  //             pendingCreativeRequests.current[requestId].resolve(result);
+  //             delete pendingCreativeRequests.current[requestId];
+  //           }
 
-            if (reqType === 'initialCanvasItems') setIsLoadingInitialItems(false);
-            else if (reqType === 'adaptCanvasItem' && originalItemId && targetPlatform) {
-              setIsLoadingAdaptation(prev => ({ ...prev, [originalItemId]: { ...prev[originalItemId], [targetPlatform]: false } }));
-            } else if (reqType === 'suggestPrompt') setIsLoadingPromptSuggestion(false);
-          }
-          break;
-        case 'error':
-          {
-            const errorPayload = payload as WorkerMessagePayload;
-            const errorMessage = errorPayload.message || 'An unknown error occurred in the creative AI worker.';
-            setError(`Creative Model Error: ${errorMessage}`);
-            setCreativeModelProgress('Error encountered.');
-            // Reject relevant pending requests
-            Object.values(pendingCreativeRequests.current).forEach((p: CreativePendingRequest) => p.reject(new Error(errorMessage)));
-            pendingCreativeRequests.current = {};
-            setIsLoadingInitialItems(false);
-            setIsLoadingAdaptation({});
-            setIsLoadingPromptSuggestion(false);
-          }
-          break;
-      }
-    };
-    setCreativeModelProgress('Initializing Creative AI model...');
-    newCreativeWorker.postMessage({ type: 'init', payload: { model: WEBLLM_CREATIVE_MODEL } });
+  //           if (reqType === 'initialCanvasItems') setIsLoadingInitialItems(false);
+  //           else if (reqType === 'adaptCanvasItem' && originalItemId && targetPlatform) {
+  //             setIsLoadingAdaptation(prev => ({ ...prev, [originalItemId]: { ...prev[originalItemId], [targetPlatform]: false } }));
+  //           } else if (reqType === 'suggestPrompt') setIsLoadingPromptSuggestion(false);
+  //         }
+  //         break;
+  //       case 'error':
+  //         {
+  //           const errorPayload = payload as WorkerMessagePayload;
+  //           const errorMessage = errorPayload.message || 'An unknown error occurred in the creative AI worker.';
+  //           setError(`Creative Model Error: ${errorMessage}`);
+  //           setCreativeModelProgress('Error encountered.');
+  //           // Reject relevant pending requests
+  //           Object.values(pendingCreativeRequests.current).forEach((p: CreativePendingRequest) => p.reject(new Error(errorMessage)));
+  //           pendingCreativeRequests.current = {};
+  //           setIsLoadingInitialItems(false);
+  //           setIsLoadingAdaptation({});
+  //           setIsLoadingPromptSuggestion(false);
+  //         }
+  //         break;
+  //     }
+  //   };
+  //   setCreativeModelProgress('Initializing Creative AI model...');
+  //   newCreativeWorker.postMessage({ type: 'init', payload: { model: WEBLLM_CREATIVE_MODEL } });
 
-    // Initialize Chatbot Worker
-    const newChatbotWorker = new Worker(workerScriptURL, { type: 'module' });
-    chatbotWorkerRef.current = newChatbotWorker;
-    newChatbotWorker.onmessage = (event: MessageEvent<any>) => {
-      const { type, payload } = event.data as { type: string; payload: any };
-      switch (type) {
-        case 'progress':
-          setChatbotModelProgress((payload as WorkerMessagePayload).text || 'Processing...');
-          break;
-        case 'init-done':
-          setChatbotModelLoaded(true);
-          setChatbotModelProgress((payload as WorkerMessagePayload).message || 'Chatbot model ready.');
-          break;
-        case 'chat-chunk':
-          {
-            const { chunk, requestId } = payload;
-            const request = pendingChatbotRequests.current[requestId];
-            if (request && request.onChunk) request.onChunk(chunk);
-          }
-          break;
-        case 'chat-complete':
-          {
-            const { fullResponse, requestId } = payload;
-            const request = pendingChatbotRequests.current[requestId];
-            if (request) {
-              request.resolve(fullResponse);
-              delete pendingChatbotRequests.current[requestId];
-            }
-            setIsLoadingChatMessage(false);
-          }
-          break;
-        case 'error':
-          {
-            const errorPayload = payload as WorkerMessagePayload;
-            const errorMessage = errorPayload.message || 'An unknown error occurred in the chatbot AI worker.';
-            setError(`Chatbot Model Error: ${errorMessage}`); // Consider if this should be a separate error state
-            setChatbotModelProgress('Error encountered.');
-             // Reject relevant pending requests
-            Object.values(pendingChatbotRequests.current).forEach((p: ChatbotPendingRequest) => p.reject(new Error(errorMessage)));
-            pendingChatbotRequests.current = {};
-            setIsLoadingChatMessage(false);
-          }
-          break;
-      }
-    };
-    setChatbotModelProgress('Initializing Chatbot AI model...');
-    newChatbotWorker.postMessage({ type: 'init', payload: { model: WEBLLM_CHATBOT_MODEL } });
+  //   // Initialize Chatbot Worker
+  //   const newChatbotWorker = new Worker(workerScriptURL, { type: 'module' });
+  //   chatbotWorkerRef.current = newChatbotWorker;
+  //   newChatbotWorker.onmessage = (event: MessageEvent<any>) => {
+  //     const { type, payload } = event.data as { type: string; payload: any };
+  //     switch (type) {
+  //       case 'progress':
+  //         setChatbotModelProgress((payload as WorkerMessagePayload).text || 'Processing...');
+  //         break;
+  //       case 'init-done':
+  //         setChatbotModelLoaded(true);
+  //         setChatbotModelProgress((payload as WorkerMessagePayload).message || 'Chatbot model ready.');
+  //         break;
+  //       case 'chat-chunk':
+  //         {
+  //           const { chunk, requestId } = payload;
+  //           const request = pendingChatbotRequests.current[requestId];
+  //           if (request && request.onChunk) request.onChunk(chunk);
+  //         }
+  //         break;
+  //       case 'chat-complete':
+  //         {
+  //           const { fullResponse, requestId } = payload;
+  //           const request = pendingChatbotRequests.current[requestId];
+  //           if (request) {
+  //             request.resolve(fullResponse);
+  //             delete pendingChatbotRequests.current[requestId];
+  //           }
+  //           setIsLoadingChatMessage(false);
+  //         }
+  //         break;
+  //       case 'error':
+  //         {
+  //           const errorPayload = payload as WorkerMessagePayload;
+  //           const errorMessage = errorPayload.message || 'An unknown error occurred in the chatbot AI worker.';
+  //           setError(`Chatbot Model Error: ${errorMessage}`); // Consider if this should be a separate error state
+  //           setChatbotModelProgress('Error encountered.');
+  //            // Reject relevant pending requests
+  //           Object.values(pendingChatbotRequests.current).forEach((p: ChatbotPendingRequest) => p.reject(new Error(errorMessage)));
+  //           pendingChatbotRequests.current = {};
+  //           setIsLoadingChatMessage(false);
+  //         }
+  //         break;
+  //     }
+  //   };
+  //   setChatbotModelProgress('Initializing Chatbot AI model...');
+  //   newChatbotWorker.postMessage({ type: 'init', payload: { model: WEBLLM_CHATBOT_MODEL } });
     
-    return () => {
-      newCreativeWorker.terminate();
-      newChatbotWorker.terminate();
-      URL.revokeObjectURL(workerScriptURL);
-    };
-  }, []);
+  //   return () => {
+  //     newCreativeWorker.terminate();
+  //     newChatbotWorker.terminate();
+  //     URL.revokeObjectURL(workerScriptURL);
+  //   };
+  // }, []);
 
   const generateInitialCanvasItems = useCallback((props: GenerateInitialCanvasItemsProps): Promise<string[]> => {
     return new Promise<string[]>((resolve, reject) => {

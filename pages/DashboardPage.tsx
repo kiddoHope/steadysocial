@@ -197,7 +197,6 @@ const DashboardPage: React.FC = () => {
   } = useCanvas();
   
   const [displayedCanvases, setDisplayedCanvases] = useState<ContentCanvas[]>([]);
-  console.log(displayedCanvases);
   
   const [filter, setFilter] = useState<CanvasStatus | 'all'>('all');
   const { currentUser } = useAuth();

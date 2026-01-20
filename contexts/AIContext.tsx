@@ -68,7 +68,7 @@ export const AIProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   return (
     <AIContext.Provider value={webLLMValues}>
-      {showLoader && (
+      {/* {showLoader && (
         <div
           className={`
             fixed top-10 right-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 
@@ -104,7 +104,7 @@ export const AIProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             <p className="text-xs text-red-500 mt-2 pt-2 border-t border-red-200 dark:border-red-700">{error}</p>
           )}
         </div>
-      )}
+      )} */}
       {children}
     </AIContext.Provider>
   );

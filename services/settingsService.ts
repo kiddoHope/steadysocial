@@ -1,6 +1,6 @@
 import { FacebookSettings } from '../types';
 
-const baseURL = "https://pilot.sgcsystems.com/userAPI.php";
+const baseURL = "https://steadysocial.dropletsofnature.com/userAPI.php";
 
 // --- Configuration ---
 // IMPORTANT: Replace this URL with the actual path to your api.php file on your server.

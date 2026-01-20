@@ -1,8 +1,9 @@
 import { User, UserRole, Theme } from '../types';
+import { ResetPasswordPayload, VerifyResetCodePayload, VerifyCodePayload} from '../types'
+import { signPayload } from '../utils/hashPayload';
 
 // --- Configuration ---
-const API_BASE_URL = 'https://pilot.sgcsystems.com/userAPI.php'; 
-const JWT_STORAGE_KEY = 'user_auth_token';
+const API_BASE_URL = process.env.VITE_API_KEY; 
 
 // --- Helper for API Requests ---
 const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
@@ -34,33 +35,50 @@ const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T
 
 type UserWithoutPassword = Omit<User, 'password'>;
 
+const generateSecret = (head: string, content: string) => {
+ const secret = [
+    process.env.VITE_ENCRYPTED_KEY,
+    head,
+    content
+ ];
+
+ return secret;
+}
+
 // --- Service Functions ---
 
-export const dbAutoLoginWithToken = async (): Promise<UserWithoutPassword | null> => {
-    const token = localStorage.getItem(JWT_STORAGE_KEY);
+export const dbGetUserByToken = async (token: string): Promise<UserWithoutPassword | null> => {
     if (!token) {
         return null;
     }
 
+    const secret = generateSecret(
+        'autoLogin',
+        'log-'+token
+    )
+
+    const signature = await signPayload(token, secret, {
+        salt: 'auto-login',
+        info: 'auto-login-request'
+    })
+    
     try {
         // This endpoint will check the JWT and return the user if it's valid
         return await apiRequest<UserWithoutPassword>('/users/autologin', {
             method: 'POST',
-            body: JSON.stringify({ token }),
+            body: JSON.stringify({ signature }),
         });
     } catch (error) {
         // An error (like 401 Unauthorized) means an invalid or expired token
-        localStorage.removeItem(JWT_STORAGE_KEY); // Clear the invalid token
         return null;
     }
 };
-
 
 export const dbFetchUsers = async (): Promise<UserWithoutPassword[]> => {
     return apiRequest<UserWithoutPassword[]>('/users');
 };
 
-export const dbVerifyUserCredentials = async (username: string, password_param: string): Promise<UserWithoutPassword | null> => {
+export const dbVerifyUserCredentials = async (username: string, password_param: string): Promise<{ user: UserWithoutPassword, token: string } | null> => {
     try {
         const response = await apiRequest<{user: UserWithoutPassword, token: string}>('/users/login', {
             method: 'POST',
@@ -68,8 +86,7 @@ export const dbVerifyUserCredentials = async (username: string, password_param: 
         });
         
         if (response.token && response.user) {
-            localStorage.setItem(JWT_STORAGE_KEY, response.token);
-            return response.user;
+            return response;
         }
         return null;
 
@@ -80,9 +97,11 @@ export const dbVerifyUserCredentials = async (username: string, password_param: 
     }
 };
 
-export const dbLogout = (): void => {
-    localStorage.removeItem(JWT_STORAGE_KEY);
-    // You may want to redirect the user or update the app state here
+export const dbInvalidateToken = async (token: string): Promise<void> => {
+    await apiRequest('/users/logout', {
+        method: 'POST',
+        body: JSON.stringify({ token }),
+    });
 };
 
 
@@ -117,6 +136,55 @@ export const dbUpdateUserPassword = async (userId: string, newPassword_param: st
     } catch (error) {
         return false;
     }
+};
+
+export const dbForgotPassword = async (email: string): Promise<{ success: boolean; message: string }> => {
+    const FORGOT_PASSWORD_URL = 'https://steadysocial.dropletsofnature.com/forgotpassword.php';
+    try {
+        const response = await fetch(FORGOT_PASSWORD_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify({ email }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'An unknown API error occurred.' }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('API Request Failed for Forgot Password:', error);
+        throw error; // Re-throw to be handled by the calling component
+    }
+};
+
+export const dbVerifyPasswordResetCode = async (payload: VerifyResetCodePayload): Promise<{ success: boolean; message: string }> => {
+    // This endpoint checks the code and its expiry, but does not change the password.
+    // It's a precursor to the final reset step.
+    return apiRequest<{ success: boolean; message: string }>('/users/verify-reset-code', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
+};
+
+export const dbResetPassword = async (payload: ResetPasswordPayload): Promise<{ success: boolean; message: string }> => {
+    return apiRequest<{ success: boolean; message: string }>('/users/reset-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
+};
+
+export const dbVerifyCode = async (payload: VerifyCodePayload): Promise<{ success: boolean; message: string }> => {
+    // This function corresponds to the `verify_code.php` script.
+    // The path `/users/verify-code` assumes server-side routing maps this to the script.
+    return apiRequest<{ success: boolean; message: string }>('/users/verify-code', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
 };
 
 export const dbGetUserTheme = async (userId: string): Promise<Theme | null> => {
