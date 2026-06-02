@@ -13,10 +13,26 @@
           extend: {
             colors: {
               primary: {"50":"#f5f3ff","100":"#ede9fe","200":"#ddd6fe","300":"#c4b5fd","400":"#a78bfa","500":"#8b5cf6","600":"#7c3aed","700":"#6d28d9","800":"#5b21b6","900":"#4c1d95","950":"#2e1065"},
-              secondary: {"50":"#f8fafc","100":"#f1f5f9","200":"#e2e8f0","300":"#cbd5e1","400":"#94a3b8","500":"#64748b","600":"#475569","700":"#334155","800":"#1e293b","900":"#0f172a","950":"#020617"}
+              secondary: {"50":"#f8fafc","100":"#f1f5f9","200":"#e2e8f0","300":"#cbd5e1","400":"#94a3b8","500":"#64748b","600":"#475569","700":"#334155","800":"#1e293b","900":"#0f172a","950":"#020617"},
+              neo: {
+                bg: '#FFFDF5',
+                accent: '#FF6B6B',
+                secondary: '#FFD93D',
+                muted: '#C4B5FD',
+                black: '#000000',
+              }
             },
-
-            // Add the keyframes and animation utilities here
+            boxShadow: {
+              'neo-sm': '4px 4px 0px 0px rgba(0,0,0,1)',
+              'neo-md': '8px 8px 0px 0px rgba(0,0,0,1)',
+              'neo-lg': '12px 12px 0px 0px rgba(0,0,0,1)',
+              'neo-xl': '16px 16px 0px 0px rgba(0,0,0,1)',
+              'neo-accent': '8px 8px 0px 0px #FF6B6B',
+              'neo-secondary': '8px 8px 0px 0px #FFD93D',
+            },
+            fontFamily: {
+              'space': ['"Space Grotesk"', 'sans-serif'],
+            },
             keyframes: {
               'slide-in-from-right': {
                 '0%': { transform: 'translateX(100%)', opacity: '0' },
@@ -25,11 +41,16 @@
               'slide-out-to-right': {
                 '0%': { transform: 'translateX(0)', opacity: '1' },
                 '100%': { transform: 'translateX(100%)', opacity: '0' },
+              },
+              'spin-slow': {
+                'from': { transform: 'rotate(0deg)' },
+                'to': { transform: 'rotate(360deg)' },
               }
             },
             animation: {
               'slide-in-from-right': 'slide-in-from-right 0.5s ease-out forwards',
               'slide-out-to-right': 'slide-out-to-right 0.5s ease-in forwards',
+              'spin-slow': 'spin-slow 10s linear infinite',
             }
           }
         }

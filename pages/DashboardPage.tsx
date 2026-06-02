@@ -15,45 +15,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { Link } from 'react-router-dom';
 
 
-const base64ToBlob = async (base64Data: string): Promise<{ blob: Blob, mimeType: string, fileName: string } | null> => {
-  if (!base64Data || typeof base64Data !== 'string' || !base64Data.startsWith('data:image')) {
-    console.warn("base64ToBlob: Input is not a valid base64 image data URI string starting with 'data:image'. Input:", base64Data?.substring(0, 100));
-    return null;
-  }
-  try {
-    const response = await fetch(base64Data); 
-    if (!response.ok) {
-        console.warn("base64ToBlob: Fetch failed for data URI.", response.status, response.statusText);
-        return null;
-    }
-    const blob = await response.blob();
-
-    if (blob.size === 0) {
-      console.warn("base64ToBlob: Produced an empty blob from fetch. Original data may be corrupt or empty.");
-      return null;
-    }
-    
-    const mimeType = blob.type; 
-    if (!mimeType || !mimeType.startsWith('image/')) {
-        console.warn("base64ToBlob: Fetched blob is not an image type or MIME type is missing.", mimeType);
-        return null;
-    }
-    
-    const supportedFacebookMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/tiff', 'image/webp'];
-    if (!supportedFacebookMimeTypes.includes(mimeType.toLowerCase())) {
-        console.warn(`base64ToBlob: MIME type "${mimeType}" may not be explicitly listed as supported by Facebook. Attempting anyway. Supported: ${supportedFacebookMimeTypes.join(', ')}`);
-    }
-
-    const extensionParts = mimeType.split('/');
-    const extension = extensionParts.length > 1 ? extensionParts[1].split('+')[0] : 'png'; 
-    const fileName = `image.${extension}`; 
-
-    return { blob, mimeType, fileName };
-  } catch (error) {
-    console.error("Error converting base64 to Blob using fetch:", error);
-    return null;
-  }
-};
+// Unused helper removed
 
 
 const CanvasDisplayCard: React.FC<{ 
@@ -64,7 +26,7 @@ const CanvasDisplayCard: React.FC<{
   currentUserRole: UserRole | undefined;
   currentUserId: string | undefined;
   isFacebookReady: boolean;
-  isProcessing: boolean; // Added to disable buttons during operations
+  isProcessing: boolean;
 }> = ({ canvas, onUpdateStatus, onDelete, onOpenPostModal, currentUserRole, currentUserId, isFacebookReady, isProcessing }) => {
   const isAdmin = currentUserRole === UserRole.ADMIN;
   const [adminFeedbackInput, setAdminFeedbackInput] = useState('');
@@ -84,100 +46,122 @@ const CanvasDisplayCard: React.FC<{
   };
   const handleDelete = async () => {
     if (isProcessing) return;
-    if (window.confirm(`Are you sure you want to delete canvas "${canvas.title || canvas.id}"? This action cannot be undone.`)) {
+    if (window.confirm(`Are you sure you want to delete canvas "${canvas.title || canvas.id}"?`)) {
         await onDelete(canvas.id);
     }
   };
 
-  const getStatusColor = (status: CanvasStatus) => {
+  const getStatusInfo = (status: CanvasStatus) => {
     switch (status) {
-      case CanvasStatus.DRAFT: return 'bg-slate-500';
-      case CanvasStatus.PENDING_REVIEW: return 'bg-yellow-500';
-      case CanvasStatus.NEEDS_REVISION: return 'bg-orange-500';
-      case CanvasStatus.APPROVED: return 'bg-green-500';
-      default: return 'bg-gray-500';
+      case CanvasStatus.DRAFT: return { color: 'bg-white', text: 'DRAFT', icon: 'fa-pencil-alt' };
+      case CanvasStatus.PENDING_REVIEW: return { color: 'bg-neo-secondary', text: 'REVIEW', icon: 'fa-search' };
+      case CanvasStatus.NEEDS_REVISION: return { color: 'bg-neo-muted', text: 'REVISE', icon: 'fa-sync' };
+      case CanvasStatus.APPROVED: return { color: 'bg-neo-accent', text: 'READY', icon: 'fa-check' };
+      default: return { color: 'bg-white', text: 'UNKNOWN', icon: 'fa-question' };
     }
   };
 
+  const statusInfo = getStatusInfo(canvas.status);
   const canEditOrDelete = isAdmin || (canvas.createdBy === currentUserId && (canvas.status === CanvasStatus.DRAFT || canvas.status === CanvasStatus.NEEDS_REVISION));
 
   return (
-    <Card className="flex flex-col h-full shadow-lg hover:shadow-xl transition-shadow duration-300">
-      <div className={`p-4 border-b dark:border-slate-700 ${getStatusColor(canvas.status)}`}>
-        <div className="flex justify-between items-center ">
-            <h3 className="text-lg font-semibold text-white truncate" title={canvas.title || 'Untitled Canvas'}>
-                {canvas.title || 'Untitled Canvas'}
-            </h3>
-            <span className={`px-2 py-0.5 text-xs text-white rounded-full border border-white/50`}>
-                {canvas.status?.replace('_', ' ').toUpperCase()}
-            </span>
+    <Card 
+      hoverEffect 
+      className="flex flex-col h-full !p-0 neo-card-hover group"
+    >
+      <div className={`p-5 neo-border-b bg-neo-black text-white relative overflow-hidden`}>
+        <div className="absolute top-0 right-0 p-4 opacity-10 -rotate-12 translate-x-2 -translate-y-2 group-hover:scale-125 transition-transform">
+            <i className={`fas ${statusInfo.icon} text-6xl`}></i>
         </div>
-        <p className="text-xs text-white/80 mt-1">Created: {new Date(canvas.createdAt).toLocaleDateString()}</p>
-        {canvas.submittedAt && <p className="text-xs text-white/80">Submitted: {new Date(canvas.submittedAt).toLocaleDateString()}</p>}
+        <div className="flex justify-between items-start relative z-10">
+            <h3 className="text-xl font-black uppercase tracking-tighter truncate max-w-[70%]" title={canvas.title || 'Untitled'}>
+                {canvas.title || 'Untitled'}
+            </h3>
+            <div className={`${statusInfo.color} neo-border-sm px-2 py-1 rotate-3 group-hover:rotate-0 transition-transform`}>
+                <span className="text-[10px] font-black text-neo-black uppercase tracking-widest">
+                    {statusInfo.text}
+                </span>
+            </div>
+        </div>
+        <div className="mt-4 flex gap-4">
+            <div className="bg-white/10 px-2 py-1 text-[10px] font-bold uppercase">
+                {new Date(canvas.createdAt).toLocaleDateString()}
+            </div>
+            {canvas.items.length > 0 && (
+                <div className="bg-white/10 px-2 py-1 text-[10px] font-bold uppercase">
+                    {canvas.items.length} ITEMS
+                </div>
+            )}
+        </div>
       </div>
       
-      <div className="p-4 flex-grow flex flex-col">
-        <div className="mb-3">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Content Summary:</p>
+      <div className="p-6 flex-grow flex flex-col bg-white group-hover:bg-neo-bg transition-colors">
+        <div className="mb-4 relative">
+            <div className="absolute -left-6 top-0 w-1 h-full bg-neo-black opacity-10"></div>
+            <p className="text-xs font-black uppercase tracking-widest text-neo-black/40 mb-2">Primary Content</p>
             {canvas.items && canvas.items.length > 0 ? (
-                <p className="text-sm text-slate-600 dark:text-slate-400 truncate" title={canvas.items[0].originalText}>
+                <p className="text-sm font-bold leading-relaxed line-clamp-3">
                     {canvas.items[0].originalText}
                 </p>
             ) : (
-                <p className="text-sm text-slate-500 dark:text-slate-400 italic">No content items in this canvas.</p>
+                <p className="text-sm font-bold italic opacity-40">Empty Canvas.</p>
             )}
-        </div>
-        <div className="mb-3">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Items: <span className="font-normal">{canvas.items.length}</span></p>
         </div>
 
         {canvas.overallImagePreview && (
-            <div className="my-2">
-                <img src={canvas.overallImagePreview} alt="Canvas context" className="rounded h-auto w-full shadow-md"/>
+            <div className="my-4 relative">
+                <div className="absolute inset-0 neo-border translate-x-2 translate-y-2 pointer-events-none"></div>
+                <img src={canvas.overallImagePreview} alt="Preview" className="neo-border w-full aspect-video object-cover grayscale group-hover:grayscale-0 transition-all"/>
             </div>
         )}
         
         {canvas.status === CanvasStatus.NEEDS_REVISION && canvas.adminFeedback && (
-            <Alert type="warning" message={`Admin Feedback: ${canvas.adminFeedback}`} className="my-2 text-xs"/>
+            <div className="my-4 bg-neo-muted p-4 neo-border-sm rotate-1">
+                <p className="text-[10px] font-black uppercase tracking-widest mb-1">Feedback</p>
+                <p className="text-xs font-bold italic">"{canvas.adminFeedback}"</p>
+            </div>
         )}
 
-        <div className="mt-auto pt-4 border-t border-slate-200 dark:border-slate-700 space-y-2">
+        <div className="mt-auto pt-6 flex flex-col gap-3">
           {isAdmin && canvas.status === CanvasStatus.PENDING_REVIEW && (
-            <>
-              <Button onClick={handleApprove} variant="success" size="sm" className="w-full" disabled={isProcessing} isLoading={isProcessing}>Approve</Button>
+            <div className="bg-neo-secondary/10 p-4 neo-border-sm mb-2">
+              <Button onClick={handleApprove} variant="success" size="sm" className="w-full" disabled={isProcessing} isLoading={isProcessing}>APPROVE SYSTEM</Button>
               <Input 
                 type="textarea"
-                placeholder="Feedback for revision..."
+                placeholder="REVISION NOTES..."
                 value={adminFeedbackInput}
                 onChange={(e) => setAdminFeedbackInput(e.target.value)}
                 rows={2}
-                wrapperClassName="my-2"
+                wrapperClassName="my-3 mb-0"
+                className="!text-xs"
                 disabled={isProcessing}
               />
-              <Button onClick={handleRequestRevision} variant="warning" size="sm" className="w-full" disabled={isProcessing || !adminFeedbackInput.trim()} isLoading={isProcessing}>Request Revisions</Button>
-            </>
+              <Button onClick={handleRequestRevision} variant="warning" size="sm" className="w-full mt-3" disabled={isProcessing || !adminFeedbackInput.trim()} isLoading={isProcessing}>DEMAND REVISION</Button>
+            </div>
           )}
 
-          {canEditOrDelete && (
-             <Button onClick={handleDelete} variant="danger" size="sm" className="w-full mt-2" disabled={isProcessing} isLoading={isProcessing}>Delete Canvas</Button>
-           )}
-            
-            <Link to={`/generate?canvasId=${canvas.id}`} className="block mt-2">
-              <Button variant="secondary" size="sm" className="w-full" disabled={isProcessing}>
-                {canvas.status === CanvasStatus.DRAFT || (canvas.createdBy === currentUserId && canvas.status === CanvasStatus.NEEDS_REVISION) ? "Edit Canvas" : "View Canvas Details"}
+          <div className="grid grid-cols-2 gap-3">
+            <Link to={`/generate?canvasId=${canvas.id}`} className="block">
+              <Button variant="secondary" size="sm" className="w-full !px-2" disabled={isProcessing}>
+                {canvas.status === CanvasStatus.DRAFT || (canvas.createdBy === currentUserId && canvas.status === CanvasStatus.NEEDS_REVISION) ? "EDIT" : "VIEW"}
               </Button>
             </Link>
+            
+            {canEditOrDelete && (
+                <Button onClick={handleDelete} variant="danger" size="sm" className="w-full" disabled={isProcessing} isLoading={isProcessing}>DELETE</Button>
+            )}
+          </div>
 
             {canvas.status === CanvasStatus.APPROVED && (
               <Button 
                 onClick={() => onOpenPostModal(canvas)} 
                 variant="primary" 
-                size="sm" 
-                className="w-full mt-2"
+                size="md" 
+                className="w-full mt-1"
                 disabled={!isFacebookReady || isProcessing}
-                title={!isFacebookReady ? "Connect to Facebook in Settings to enable posting" : "Post to Facebook"}
+                icon={<i className="fab fa-facebook"></i>}
               >
-                <i className="fab fa-facebook mr-2"></i> Post to Facebook
+                POST TO FACEBOOK
               </Button>
             )}
         </div>
@@ -234,12 +218,13 @@ const DashboardPage: React.FC = () => {
   }, [fetchCanvases]);
 
 
-  const { isSdkInitialized, fbApi, error: sdkError, FB: fbInstance } = useFacebookSDK(
+  const { fbApi, error: sdkError } = useFacebookSDK(
     fbSettings?.appId, 
-    fbSettings?.sdkUrl
+    undefined,
+    fbSettings?.accessToken
   );
 
-  const isFacebookReady = isSdkInitialized && !!fbInstance?.getUserID() && !isLoadingFbSettings;
+  const isFacebookReady = !!fbSettings?.accessToken && !!fbApi && !isLoadingFbSettings;
 
   useEffect(() => {
     if (!isLoadingCanvases) {
@@ -308,10 +293,12 @@ const DashboardPage: React.FC = () => {
     _selectedItem: CanvasItem, 
     textToPost: string,
     imageToUse?: string | null, 
-    newImageFile?: File | null   
+    newImageFile?: File | null,
+    isScheduled?: boolean,
+    scheduledPublishTime?: number
   ) => {
-    if (!fbApi || !fbSettings?.pageId || !fbSettings?.appId || !isFacebookReady || !fbInstance) {
-      setPostToFacebookError("Facebook connection not ready, Page ID, or App ID not set.");
+    if (!fbApi || !fbSettings?.pageId || !fbSettings?.appId || !isFacebookReady) {
+      setPostToFacebookError("Facebook connection not ready, Page ID, or App ID not set. Configure access token in Settings.");
       return;
     }
     setIsPostingToFacebook(true);
@@ -319,134 +306,112 @@ const DashboardPage: React.FC = () => {
     setPostToFacebookSuccess(null);
 
     let imageNote = "";
-    let mediaFbid: string | null = null;
 
     try {
-      setPostToFacebookSuccess("Fetching Page Access Token...");
-      const accountsResponse = await fbApi<{data: FacebookPage[]}>('/me/accounts?fields=id,name,access_token');
-      const targetPage = accountsResponse.data.find(p => p.id === fbSettings.pageId);
-      if (!targetPage?.access_token) {
-        throw new Error("Page Access Token not found. Ensure page is managed and permissions granted.");
+      const pageAccessToken = fbSettings.accessToken;
+      if (!pageAccessToken) {
+          throw new Error("Access Token not found. Please configure it in Settings.");
       }
-      const pageAccessToken = targetPage.access_token;
-      
-      const userAuthResponse = fbInstance.getAuthResponse();
-      if (!userAuthResponse?.accessToken) {
-          throw new Error("User Access Token not found. Please re-login via Facebook in Settings.");
-      }
-      const userAccessToken = userAuthResponse.accessToken;
 
       if (newImageFile || (imageToUse && imageToUse.startsWith('data:image'))) {
-        setPostToFacebookSuccess("Starting image upload process...");
+        setPostToFacebookSuccess(isScheduled ? "Preparing image for schedule..." : "Preparing image for upload...");
 
-        let fileDataBlob: Blob;
-        let uploadFileName: string;
+        let imageDataUrl: string | null = null;
 
         if (newImageFile) {
-            fileDataBlob = newImageFile;
-            uploadFileName = newImageFile.name;
-            setPostToFacebookSuccess("New image provided. Preparing for resumable upload...");
-        } else { 
-            const blobInfo = await base64ToBlob(imageToUse!);
-            if (!blobInfo) {
-                throw new Error("Failed to convert original image data for upload.");
-            }
-            fileDataBlob = blobInfo.blob;
-            uploadFileName = blobInfo.fileName;
-            setPostToFacebookSuccess("Original image converted. Preparing for resumable upload...");
+            // Convert File to data URL for the backend to handle simply
+            const reader = new FileReader();
+            imageDataUrl = await new Promise((resolve) => {
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(newImageFile);
+            });
+            setPostToFacebookSuccess(isScheduled ? "New image prepared. Scheduling on Facebook..." : "New image prepared. Uploading to Facebook...");
+        } else {
+            imageDataUrl = imageToUse!;
+            setPostToFacebookSuccess(isScheduled ? "Original image prepared. Scheduling on Facebook..." : "Original image prepared. Uploading to Facebook...");
         }
 
-        const fileLength = fileDataBlob.size;
-        const fileType = fileDataBlob.type;
+        if (!imageDataUrl) {
+            throw new Error("Failed to process image for upload.");
+        }
 
-        setPostToFacebookSuccess("Step 1/3: Starting upload session...");
-        const uploadSessionResponse = await fbApi<{ id: string }>(
-            `/${fbSettings.appId}/uploads`,
-            'post',
-            {
-                file_name: uploadFileName,
-                file_length: fileLength,
-                file_type: fileType,
-                access_token: userAccessToken 
-            }
+        // Use the simplified photo API call which the backend handles
+        const photoParams: any = {
+            imageDataUrl: imageDataUrl,
+            message: textToPost,
+            access_token: pageAccessToken
+        };
+        if (isScheduled && scheduledPublishTime) {
+            photoParams.published = false;
+            photoParams.scheduled_publish_time = scheduledPublishTime;
+        } else {
+            photoParams.published = true;
+        }
+
+        await fbApi(`/${fbSettings.pageId}/photos`, 'post', photoParams);
+        
+        imageNote = isScheduled 
+          ? ` (Image uploaded and scheduled for ${new Date(scheduledPublishTime! * 1000).toLocaleString()}).` 
+          : " (Image uploaded and posted with caption).";
+        
+        setPostToFacebookSuccess(isScheduled 
+          ? `Successfully scheduled post for Facebook page "${fbSettings.pageId}"${imageNote}`
+          : `Successfully posted to Facebook page "${fbSettings.pageId}"${imageNote}.`
         );
-        const rawUploadSessionId = uploadSessionResponse.id; 
-        if (!rawUploadSessionId || !rawUploadSessionId.startsWith('upload:')) {
-            throw new Error("Failed to start upload session or received invalid session ID.");
-        }
-        setPostToFacebookSuccess(`Step 1/3: Upload session started (ID: ${rawUploadSessionId}).`);
-
-        setPostToFacebookSuccess("Step 2/3: Uploading file data...");
-        const uploadUrl = `https://graph.facebook.com/v23.0/${rawUploadSessionId}`;
-        const uploadFileResponse = await fetch(uploadUrl, {
-            method: 'POST',
-            headers: {
-                'Authorization': `OAuth ${userAccessToken}`,
-                'file_offset': '0',
-            },
-            body: fileDataBlob,
-        });
-
-        if (!uploadFileResponse.ok) {
-            const errorData = await uploadFileResponse.json().catch(() => ({ message: "Unknown upload error", error: { message: "Unknown upload error" } }));
-            throw new Error(`Failed to upload file (Step 2): ${errorData.error?.message || errorData.message || uploadFileResponse.statusText}`);
-        }
-        const uploadResult = await uploadFileResponse.json();
-        const fileHandle = uploadResult.h;
-        if (!fileHandle) {
-            throw new Error("File upload successful (Step 2) but no file handle received.");
-        }
-        setPostToFacebookSuccess(`Step 2/3: File data uploaded (Handle: ${fileHandle}).`);
-
-        setPostToFacebookSuccess("Step 3/3: Creating page photo from uploaded file...");
-        const photoPublishResponse = await fbApi<{ id: string }>(
-            `/${fbSettings.pageId}/photos`,
-            'post',
-            {
-                source: `fh:${fileHandle}`,
-                published: false,
-                temporary: true,
-                access_token: pageAccessToken, 
-            }
-        );
-
-        if (!photoPublishResponse?.id) {
-          throw new Error("Failed to publish photo from file handle or get photo ID (Step 3).");
-        }
-        mediaFbid = photoPublishResponse.id;
-        imageNote = " (Image successfully uploaded via resumable session and attached).";
-        setPostToFacebookSuccess("Step 3/3: Page photo created. Preparing post...");
 
       } else if (imageToUse && (imageToUse.startsWith('http://') || imageToUse.startsWith('https://'))) {
-         imageNote = " (Image will be posted as a link).";
-         setPostToFacebookSuccess("Image provided as URL. Preparing post...");
-      } else if (imageToUse) {
-        imageNote = " (Original image is in an unrecognized format or could not be processed for direct upload; posting text-only).";
-         console.warn("Facebook Post: Original image provided but is not a data URI and not a direct URL. Posting text-only.", imageToUse.substring(0,100));
-         setPostToFacebookSuccess("Original image format not suitable for upload. Preparing text-only post...");
+          // If it's a URL, use the photos endpoint with imageUrl
+          setPostToFacebookSuccess(isScheduled ? "Image URL provided. Scheduling on Facebook..." : "Image URL provided. Posting to Facebook...");
+          
+          const photoParams: any = {
+              imageUrl: imageToUse,
+              message: textToPost,
+              access_token: pageAccessToken
+          };
+          if (isScheduled && scheduledPublishTime) {
+              photoParams.published = false;
+              photoParams.scheduled_publish_time = scheduledPublishTime;
+          } else {
+              photoParams.published = true;
+          }
+
+          await fbApi(`/${fbSettings.pageId}/photos`, 'post', photoParams);
+          
+          imageNote = isScheduled
+            ? ` (Image URL scheduled as photo with caption for ${new Date(scheduledPublishTime! * 1000).toLocaleString()}).`
+            : " (Image URL posted as photo with caption).";
+          
+          setPostToFacebookSuccess(isScheduled 
+            ? `Successfully scheduled post for Facebook page "${fbSettings.pageId}"${imageNote}`
+            : `Successfully posted to Facebook page "${fbSettings.pageId}"${imageNote}.`
+          );
       } else {
-        setPostToFacebookSuccess("No image provided. Preparing text-only post...");
-      }
+          // Text-only post
+          setPostToFacebookSuccess(isScheduled ? "Preparing scheduled text-only post..." : "Preparing text-only post...");
+          
+          const feedParams: any = {
+              message: textToPost,
+              access_token: pageAccessToken
+          };
+          if (isScheduled && scheduledPublishTime) {
+              feedParams.published = false;
+              feedParams.scheduled_publish_time = scheduledPublishTime;
+          } else {
+              feedParams.published = true;
+          }
 
-      const postPayload: { message: string; link?: string; access_token: string; attached_media?: string } = {
-        message: textToPost,
-        access_token: pageAccessToken,
-      };
-
-      if (mediaFbid) {
-        postPayload.attached_media = `[{"media_fbid":"${mediaFbid}"}]`;
-      } else if (!newImageFile && imageToUse && (imageToUse.startsWith('http://') || imageToUse.startsWith('https://'))){
-        postPayload.link = imageToUse; 
+          await fbApi(`/${fbSettings.pageId}/feed`, 'post', feedParams);
+          
+          setPostToFacebookSuccess(isScheduled 
+            ? `Successfully scheduled post for Facebook page "${fbSettings.pageId}" at ${new Date(scheduledPublishTime! * 1000).toLocaleString()}.`
+            : `Successfully posted to Facebook page "${fbSettings.pageId}".`
+          );
       }
-      
-      setPostToFacebookSuccess(`Posting content to Facebook page "${targetPage.name}"...`);
-      await fbApi(`/${fbSettings.pageId}/feed`, 'post', postPayload);
-      setPostToFacebookSuccess(`Successfully posted to Facebook page "${targetPage.name}"${imageNote}.`);
       
     } catch (err: any) {
       console.error("Error posting to Facebook:", err);
       const errorMessage = err.message || err.error?.message || "An unknown error occurred.";
-      setPostToFacebookError(`Failed to post: ${errorMessage}`);
+      setPostToFacebookError(isScheduled ? `Failed to schedule: ${errorMessage}` : `Failed to post: ${errorMessage}`);
       setPostToFacebookSuccess(null); 
     } finally {
       setIsPostingToFacebook(false);
@@ -475,59 +440,81 @@ const DashboardPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-slate-800 dark:text-slate-100">Content Canvas Dashboard</h1>
-      {notification && <Alert type={notification.type} message={notification.message} onClose={() => setNotification(null)}/>}
-      {sdkError && <Alert type="error" message={`Facebook SDK Error: ${sdkError}. Posting features may be affected.`} className="mb-4"/>}
-      {!isFacebookReady && fbSettings?.appId && (
-         <Alert type="info" message="Facebook is not connected for the Main App ID or settings are still loading. Please connect in Settings to enable posting features." className="mb-4"/>
-      )}
-
-
-      <div className="mb-6 flex flex-wrap items-center gap-4">
-        <label htmlFor="statusFilter" className="text-sm font-medium text-slate-700 dark:text-slate-300">Filter by status:</label>
-        <Select
-          id="statusFilter"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value as CanvasStatus | 'all')}
-          options={filterOptions}
-          wrapperClassName="mb-0 min-w-[200px]"
-          className="dark:bg-slate-700"
-          disabled={operationInProgress}
-        />
-         {currentUser?.role === UserRole.CREATIVE && (
-             <Link to="/generate" className="ml-auto">
-                 <Button variant="primary" disabled={operationInProgress}>
-                     <i className="fas fa-plus mr-2"></i> Create New Canvas
+    <div className="min-h-full bg-neo-bg p-8 font-space relative">
+      <div className="absolute inset-0 bg-halftone opacity-5 pointer-events-none"></div>
+      
+      <div className="relative z-10 max-w-7xl mx-auto">
+        <header className="mb-12 flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
+          <div>
+            <div className="inline-block bg-neo-muted neo-border-sm px-2 py-0.5 mb-2 rotate-1">
+              <span className="text-[10px] font-black uppercase tracking-widest text-neo-black">CONTROL CENTER</span>
+            </div>
+            <h1 className="text-5xl md:text-7xl font-black uppercase tracking-tighter text-neo-black leading-none">
+              Content <span className="text-neo-accent">Canvas</span>
+            </h1>
+          </div>
+          
+          {currentUser?.role === UserRole.CREATIVE && (
+             <Link to="/generate">
+                 <Button variant="primary" size="lg" disabled={operationInProgress} icon={<i className="fas fa-plus"></i>}>
+                     NEW CANVAS
                  </Button>
             </Link>
-         )}
+          )}
+        </header>
+
+        {notification && <Alert type={notification.type} message={notification.message} onClose={() => setNotification(null)} className="mb-8" />}
+        {sdkError && <Alert type="error" message={`SDK ERROR: ${sdkError}`} className="mb-4"/>}
+        {!isFacebookReady && fbSettings?.appId && (
+           <Alert type="info" message="FACEBOOK OFFLINE: Connect in settings to enable distribution." className="mb-4"/>
+        )}
+
+        <div className="mb-10 flex flex-wrap items-center gap-6 bg-white neo-border p-6 neo-shadow-sm -rotate-1">
+          <div className="flex items-center gap-3">
+            <i className="fas fa-filter text-neo-accent"></i>
+            <span className="text-sm font-black uppercase tracking-widest text-neo-black">Filter by status</span>
+          </div>
+          <Select
+            id="statusFilter"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as CanvasStatus | 'all')}
+            options={filterOptions}
+            wrapperClassName="mb-0 min-w-[250px]"
+            disabled={operationInProgress}
+          />
+        </div>
+
+        {filteredAndSortedCanvases.length === 0 ? (
+          <div className="neo-border bg-white p-20 text-center neo-shadow-md rotate-1">
+            <i className="fas fa-folder-open text-6xl text-neo-muted mb-6"></i>
+            <p className="text-xl font-bold text-neo-black">
+              NO CANVASES DETECTED.
+              {currentUser?.role === UserRole.CREATIVE && (
+                <span className="block mt-4">
+                  INITIATE <Link to="/generate" className="text-neo-accent underline decoration-4">NEW CANVAS</Link> TO PROCEED.
+                </span>
+              )}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+            {filteredAndSortedCanvases.map(canvas => (
+              <CanvasDisplayCard 
+                key={canvas.id} 
+                canvas={canvas} 
+                onUpdateStatus={handleUpdateStatus} 
+                onDelete={handleDeleteCanvas}
+                onOpenPostModal={handleOpenPostModal}
+                currentUserRole={currentUser?.role}
+                currentUserId={currentUser?.id}
+                isFacebookReady={isFacebookReady}
+                isProcessing={operationInProgress}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {filteredAndSortedCanvases.length === 0 ? (
-        <Card>
-          <p className="text-center text-slate-500 dark:text-slate-400 py-10">
-            No canvases found matching your criteria.
-            {currentUser?.role === UserRole.CREATIVE && <span className="block mt-2">Try <Link to="/generate" className="text-primary-500 hover:underline">creating a new canvas</Link> here!</span>}
-          </p>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6">
-          {filteredAndSortedCanvases.map(canvas => (
-            <CanvasDisplayCard 
-              key={canvas.id} 
-              canvas={canvas} 
-              onUpdateStatus={handleUpdateStatus} 
-              onDelete={handleDeleteCanvas}
-              onOpenPostModal={handleOpenPostModal}
-              currentUserRole={currentUser?.role}
-              currentUserId={currentUser?.id}
-              isFacebookReady={isFacebookReady}
-              isProcessing={operationInProgress}
-            />
-          ))}
-        </div>
-      )}
       {selectedCanvasForPost && (
         <PostToFacebookModal
           isOpen={isPostModalOpen}
@@ -543,6 +530,7 @@ const DashboardPage: React.FC = () => {
           isPosting={isPostingToFacebook}
           postError={postToFacebookError}
           postSuccessMessage={postToFacebookSuccess}
+          onCloseSuccess={() => setPostToFacebookSuccess(null)}
         />
       )}
     </div>

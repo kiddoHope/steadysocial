@@ -8,6 +8,9 @@ const initialWIPState: WIPState = {
   platformContext: SocialPlatform.General,
   tone: CaptionTone.Friendly,
   numberOfIdeas: 3,
+  folderPath: null,
+  numberOfGenerations: 1,
+  imageMode: 'generate',
   overallImagePreview: null,
   overallImageFile: null,       // Transient
   overallTextFileContent: null,

@@ -16,10 +16,12 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
+const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <BrowserRouter>
+    <Router>
       <AuthProvider> {/* AuthProvider now wraps ThemeProvider */}
         <ThemeProvider>
           <AIProvider>
@@ -35,6 +37,6 @@ root.render(
           </AIProvider>
         </ThemeProvider>
       </AuthProvider>
-    </BrowserRouter>
+    </Router>
   </React.StrictMode>
 );

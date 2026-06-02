@@ -1,10 +1,8 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { useChatbot, ChatMessage as ChatMessageType } from '../../contexts/ChatbotContext';
+import { useChatbot } from '../../contexts/ChatbotContext';
 import ChatMessage from './ChatMessage';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
-import LoadingSpinner from '../ui/LoadingSpinner'; // For inline loading indicator
 
 const ChatWindow: React.FC = () => {
   const { messages, sendMessage, isLoading, error, clearError, toggleChat } = useChatbot();
@@ -32,59 +30,72 @@ const ChatWindow: React.FC = () => {
 
   return (
     <div 
-      className="fixed bottom-20 right-6 w-full max-w-md h-[70vh] max-h-[500px] bg-white dark:bg-slate-800 shadow-2xl rounded-lg flex flex-col overflow-hidden border border-slate-300 dark:border-slate-700 z-[9998]"
+      className="fixed bottom-24 right-8 w-full max-w-sm h-[60vh] max-h-[500px] bg-white neo-border neo-shadow-lg flex flex-col overflow-hidden z-[9998] font-space"
       role="dialog"
       aria-modal="true"
       aria-labelledby="chatbot-title"
     >
-      <header className="p-4 bg-slate-100 dark:bg-slate-700 border-b border-slate-200 dark:border-slate-600 flex justify-between items-center">
-        <h2 id="chatbot-title" className="text-lg font-semibold text-primary-600 dark:text-primary-400">
-          <i className="fas fa-robot mr-2"></i>SteadySocial AI
-        </h2>
+      <div className="absolute inset-0 bg-halftone opacity-5 pointer-events-none"></div>
+
+      <header className="p-4 bg-neo-black border-b-4 border-neo-black flex justify-between items-center relative z-10">
+        <div className="flex items-center gap-2">
+          <div className="bg-neo-accent p-1 neo-border-sm rotate-12">
+            <i className="fas fa-robot text-xs text-white"></i>
+          </div>
+          <h2 id="chatbot-title" className="text-sm font-black text-white uppercase tracking-widest">
+            STEADY_AI_LINK
+          </h2>
+        </div>
         <button
           onClick={toggleChat}
-          className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          className="w-8 h-8 bg-white neo-border-sm flex items-center justify-center hover:bg-neo-secondary transition-colors"
           aria-label="Close chat"
         >
-          <i className="fas fa-times fa-lg"></i>
+          <i className="fas fa-times"></i>
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 dark:bg-slate-800/50">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-neo-bg/30 relative z-10 scrollbar-hide">
         {messages.map((msg, index) => (
           <ChatMessage
             key={msg.id}
             message={msg}
-            isLastMessage={index === messages.length - 1} // Pass the isLastMessage prop
+            isLastMessage={index === messages.length - 1}
           />
         ))}
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="bg-neo-muted p-3 neo-border-sm animate-pulse">
+              <span className="text-[10px] font-black uppercase tracking-widest">SYNCING_RESPONSE...</span>
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
       {error && (
-        <div className="p-3 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 text-sm flex justify-between items-center">
-          <span>Error: {error}</span>
-          <button onClick={clearError} className="text-red-500 hover:text-red-700 dark:hover:text-red-300" aria-label="Clear error">
+        <div className="p-3 bg-neo-accent text-white text-[10px] font-black uppercase tracking-widest flex justify-between items-center relative z-10">
+          <span>{error}</span>
+          <button onClick={clearError} className="hover:text-neo-black transition-colors" aria-label="Clear error">
              <i className="fas fa-times"></i>
           </button>
         </div>
       )}
 
-      <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700">
-        <div className="flex items-center space-x-2">
+      <form onSubmit={handleSendMessage} className="p-4 bg-neo-muted neo-border-t relative z-10">
+        <div className="flex items-center gap-2">
           <Input
             ref={inputRef}
             type="text"
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
-            placeholder="Ask SteadySocial AI..."
-            className="flex-1 !my-0 dark:bg-slate-800" // Override margin from Input component
-            wrapperClassName="flex-1 !mb-0" // Override margin from Input component
-            aria-label="Chat message input"
+            placeholder="TRANSMIT_QUERY..."
+            className="flex-1 !mb-0 !py-2 !text-xs"
+            wrapperClassName="flex-1 !mb-0"
             disabled={isLoading}
           />
-          <Button type="submit" variant="primary" className="w-5" isLoading={isLoading} disabled={isLoading || !userInput.trim()} aria-label="Send message">
-            {isLoading ? <span className="sr-only">Sending...</span> : <i className="fas fa-paper-plane"></i>}
+          <Button type="submit" variant="primary" className="!p-3" isLoading={isLoading} disabled={isLoading || !userInput.trim()}>
+            <i className="fas fa-paper-plane text-xs"></i>
           </Button>
         </div>
       </form>

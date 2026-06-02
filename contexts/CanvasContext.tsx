@@ -16,13 +16,16 @@ interface CanvasContextType {
   updateCanvasItemNotes: (canvasId: string, itemId: string, notes: string) => Promise<ContentCanvas | undefined>; // Now async
   deleteCanvas: (canvasId: string) => Promise<void>; // Now async
   isLoadingCanvases: boolean;
-  fetchCanvases: () => Promise<void>; // Added to explicitly fetch canvases
+  fetchCanvases: () => Promise<void>;
+  activeCanvas: ContentCanvas | null;
+  setActiveCanvas: (canvas: ContentCanvas | null) => void;
 }
 
 const CanvasContext = createContext<CanvasContextType | undefined>(undefined);
 
 export const CanvasProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [canvases, setCanvases] = useState<ContentCanvas[]>([]);
+  const [activeCanvas, setActiveCanvas] = useState<ContentCanvas | null>(null);
   const [isLoadingCanvases, setIsLoadingCanvases] = useState(true);
 
   const fetchCanvases = useCallback(async () => {
@@ -164,7 +167,9 @@ export const CanvasProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       updateCanvasItemNotes,
       deleteCanvas,
       isLoadingCanvases,
-      fetchCanvases
+      fetchCanvases,
+      activeCanvas,
+      setActiveCanvas
     }}>
       {children}
     </CanvasContext.Provider>

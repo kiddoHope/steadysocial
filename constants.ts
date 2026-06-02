@@ -37,3 +37,11 @@ export const WEBLLM_CREATIVE_MODEL = "Hermes-3-Llama-3.2-3B-q4f32_1-MLC";
 
 // Model for chatbot interactions
 export const WEBLLM_CHATBOT_MODEL = "RedPajama-INCITE-Chat-3B-v1-q4f32_1-MLC-1k";
+
+// Local LLM Settings (for LM Studio or Ollama)
+export const DEFAULT_LOCAL_LLM_ENDPOINT = "http://localhost:1234/v1"; 
+export const DEFAULT_LOCAL_LLM_MODEL = "mistral-7b-instruct-v0.3"; 
+
+// Cloud AI Defaults
+export const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+export const DEFAULT_OPENAI_MODEL = "gpt-4o";

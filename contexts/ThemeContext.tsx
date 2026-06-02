@@ -52,7 +52,7 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     // Persist theme for logged-in user
     if (currentUser?.id && currentUser.theme !== theme && !isLoadingTheme) {
-      updateUserProfile(currentUser.id, { theme })
+      updateUserProfile({ theme })
         .catch(err => console.error("Failed to save theme preference:", err));
     }
   }, [theme, currentUser, updateUserProfile, isLoadingTheme]);

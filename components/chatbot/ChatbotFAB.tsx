@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { useChatbot } from '../../contexts/ChatbotContext';
 
@@ -8,14 +7,14 @@ const ChatbotFAB: React.FC = () => {
   return (
     <button
       onClick={toggleChat}
-      className={`fixed bottom-6 right-8 bg-primary-500 hover:bg-primary-600 text-white rounded-full h-[3vw] w-[3vw] shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-opacity-75 transition-transform duration-200 ease-in-out z-[9990] ${isChatOpen ? 'transform scale-90' : 'transform scale-100'}`}
+      className={`fixed bottom-8 right-8 bg-neo-accent text-white neo-border neo-shadow-lg h-16 w-16 focus:outline-none transition-all duration-200 z-[9990] flex items-center justify-center hover:-translate-x-1 hover:-translate-y-1 hover:neo-shadow-xl active:translate-x-0 active:translate-y-0 active:shadow-none ${isChatOpen ? 'rotate-90' : 'hover:-rotate-3'}`}
       aria-label={isChatOpen ? "Close Chatbot" : "Open Chatbot"}
       aria-expanded={isChatOpen}
     >
       {isChatOpen ? (
-        <i className="fas fa-times fa-lg"></i>
+        <i className="fas fa-times text-2xl"></i>
       ) : (
-        <i className="fas fa-comments fa-lg"></i>
+        <i className="fas fa-robot text-2xl"></i>
       )}
     </button>
   );

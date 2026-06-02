@@ -6,11 +6,16 @@ import { SocialPlatform, CaptionTone } from '../../types';
 import Card from '../ui/Card';
 
 interface ControlsPanelProps {
-  onImageUpload: (file: File | null) => void;
-  imagePreview: string | null;
-  imageFile: File | null;
+  onSelectFolder: () => void;
+  onNumberOfGenerationsChange: (value: number) => void;
+  wipState: any; // Using any for brevity here, should ideally be WIPState
+
   onTextFileUpload: (file: File | null) => void;
   textFile: File | null;
+
+  onImageModeChange: (mode: 'generate' | 'upload') => void;
+  onImageUpload: (file: File | null) => void;
+  imageFile: File | null;
   
   customPrompt: string;
   onCustomPromptChange: (value: string) => void;
@@ -35,8 +40,9 @@ interface ControlsPanelProps {
 }
 
 const ControlsPanel: React.FC<ControlsPanelProps> = ({
-  onImageUpload, imagePreview, imageFile,
+  onSelectFolder, onNumberOfGenerationsChange, wipState,
   onTextFileUpload, textFile,
+  onImageModeChange, onImageUpload, imageFile,
   customPrompt, onCustomPromptChange,
   platformContext, onPlatformContextChange, availablePlatforms,
   tone, onToneChange, availableTones,
@@ -45,152 +51,272 @@ const ControlsPanel: React.FC<ControlsPanelProps> = ({
   canvasTitle, onCanvasTitleChange,
   onSuggestPrompt, isSuggestingPrompt
 }) => {
-  const imageInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
-
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onImageUpload(e.target.files ? e.target.files[0] : null);
-  };
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const handleTextFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onTextFileUpload(e.target.files ? e.target.files[0] : null);
   };
 
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onImageUpload(e.target.files ? e.target.files[0] : null);
+  };
+
   const modelNotReady = !isModelReady;
 
   return (
-    <Card title="Content Canvas Setup" className="sticky top-20">
-      <div className="space-y-4">
+    <Card 
+      className="sticky top-24 bg-white !p-8 neo-shadow-lg"
+      title="ENGINE CONTROLS"
+      titleClassName="text-neo-accent"
+    >
+      <div className="absolute inset-0 bg-halftone opacity-5 pointer-events-none"></div>
+      
+      <div className="space-y-8 relative z-10">
         <Input
-          label="Canvas Title (Optional)"
+          label="Project Identity"
           id="canvasTitle"
           type="text"
           value={canvasTitle}
           onChange={(e) => onCanvasTitleChange(e.target.value)}
-          placeholder="e.g., Summer Campaign Ideas"
+          placeholder="ENTER CAMPAIGN TITLE"
           disabled={modelNotReady}
         />
 
+        {/* Visual Strategy Mode Selector */}
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Upload Primary Image (Optional)</label>
-          <input 
-            type="file" 
-            accept="image/*" 
-            onChange={handleImageFileChange}
-            ref={imageInputRef}
-            className="hidden"
-            disabled={modelNotReady}
-            id="imageUploadInput"
-          />
-          <Button 
-            onClick={() => imageInputRef.current?.click()} 
-            variant="primary" 
-            size="sm"
-            disabled={modelNotReady}
-            type="button" 
-            aria-label="Upload primary image"
-            className='w-full'
-          >
-            <i className="fas fa-image mr-2"></i> Choose Image
-          </Button>
-          {imageFile && <span className="ml-3 text-sm text-slate-500 dark:text-slate-400 truncate max-w-xs inline-block align-middle">{imageFile.name}</span>}
-          {/* ++ STYLE FIX: Constrained height for better layout consistency ++ */}
-          {imagePreview && <img src={imagePreview} alt="Canvas Preview" className="mt-2 rounded-md max-h-48 w-full object-cover shadow"/>}
+          <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-neo-black mb-2">Visual Strategy</label>
+          <div className="grid grid-cols-2 gap-2 p-1 bg-neo-muted neo-border-sm">
+            <button
+              type="button"
+              onClick={() => onImageModeChange('generate')}
+              disabled={modelNotReady}
+              className={`py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                wipState.imageMode === 'generate' || !wipState.imageMode
+                  ? 'bg-neo-black text-white neo-border-sm translate-x-[-2px] translate-y-[-2px] neo-shadow-sm'
+                  : 'text-neo-black hover:bg-white/50'
+              }`}
+            >
+              <i className="fas fa-magic mr-2"></i>
+              Generate Image
+            </button>
+            <button
+              type="button"
+              onClick={() => onImageModeChange('upload')}
+              disabled={modelNotReady}
+              className={`py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                wipState.imageMode === 'upload'
+                  ? 'bg-neo-black text-white neo-border-sm translate-x-[-2px] translate-y-[-2px] neo-shadow-sm'
+                  : 'text-neo-black hover:bg-white/50'
+              }`}
+            >
+              <i className="fas fa-upload mr-2"></i>
+              Upload Image
+            </button>
+          </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Upload Primary Text File (Optional)</label>
-          <input 
-            type="file" 
-            accept=".txt,.md" 
-            onChange={handleTextFileChange}
-            ref={textInputRef}
-            className="hidden"
-            disabled={modelNotReady}
-            id="textFileUploadInput"
-          />
-           <Button 
-            onClick={() => textInputRef.current?.click()} 
-            variant="primary" 
-            size="sm"
-            disabled={modelNotReady}
-            type="button"
-            aria-label="Upload primary text file"
-            className='w-full'
-          >
-            <i className="fas fa-file-alt mr-2"></i> Choose Text File
-          </Button>
-          {textFile && <span className="ml-3 text-sm text-slate-500 dark:text-slate-400 truncate max-w-xs inline-block align-middle">{textFile.name}</span>}
+        <div className="grid grid-cols-1 gap-6">
+          {/* Conditional Rendering of Generate Mode vs Upload Mode */}
+          {(wipState.imageMode === 'generate' || !wipState.imageMode) ? (
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-neo-black mb-2">Visual Source Directory</label>
+              <div className="flex gap-2">
+                <div className="flex-1 neo-border-sm bg-neo-muted p-3 text-[10px] font-bold text-neo-black truncate uppercase tracking-tighter">
+                  {wipState.folderPath || 'NO FOLDER SELECTED'}
+                </div>
+                <button 
+                  onClick={onSelectFolder} 
+                  disabled={modelNotReady}
+                  type="button" 
+                  className="neo-border-sm bg-neo-secondary px-4 py-3 flex items-center justify-center gap-3 font-black uppercase text-xs neo-shadow-sm active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all hover:bg-neo-accent hover:text-white"
+                >
+                  <i className="fas fa-folder-open"></i> 
+                  BROWSE
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-neo-black mb-2">Upload Visual Asset</label>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={handleImageFileChange}
+                ref={imageInputRef}
+                className="hidden"
+                disabled={modelNotReady}
+                id="imageFileUploadInput"
+              />
+              <div className="relative group">
+                {wipState.overallImagePreview ? (
+                  <div className="relative neo-border bg-neo-muted overflow-hidden flex flex-col items-center justify-center p-4 min-h-[140px]">
+                    <img 
+                      src={wipState.overallImagePreview} 
+                      alt="Uploaded preview" 
+                      className="max-h-[100px] object-cover neo-border-sm mb-2"
+                    />
+                    <div className="flex gap-2 w-full">
+                      <button
+                        type="button"
+                        onClick={() => imageInputRef.current?.click()}
+                        className="flex-1 py-1.5 bg-white neo-border-sm text-[9px] font-black uppercase tracking-wider text-neo-black hover:bg-neo-secondary transition-colors"
+                      >
+                        CHANGE IMAGE
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onImageUpload(null)}
+                        className="py-1.5 px-3 bg-neo-accent text-white neo-border-sm text-[9px] font-black uppercase tracking-wider hover:bg-neo-black transition-colors"
+                      >
+                        <i className="fas fa-trash"></i>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => imageInputRef.current?.click()} 
+                    disabled={modelNotReady}
+                    type="button"
+                    className="w-full min-h-[140px] neo-border bg-white p-6 flex flex-col items-center justify-center gap-2 font-black uppercase text-xs neo-shadow-sm active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-neo-secondary/30 transition-all border-dashed"
+                  >
+                    <i className="fas fa-cloud-upload-alt text-3xl text-neo-black/60 mb-1"></i>
+                    <span>CLICK TO SELECT IMAGE</span>
+                    <span className="text-[9px] text-neo-black/40 font-bold">SUPPORTS JPG, PNG, WEBP</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className={(wipState.imageMode === 'generate' || !wipState.imageMode) ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 gap-4"}>
+            {(wipState.imageMode === 'generate' || !wipState.imageMode) && (
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-neo-black mb-2">Gen Count (1-4)</label>
+                <Select
+                  id="numberOfGenerations"
+                  value={wipState.numberOfGenerations}
+                  onChange={(e) => onNumberOfGenerationsChange(parseInt(e.target.value))}
+                  options={[1, 2, 3, 4].map(n => ({ value: n, label: n.toString() }))}
+                  disabled={modelNotReady}
+                  wrapperClassName="!mb-0"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-neo-black mb-2">Data Context</label>
+              <input 
+                type="file" 
+                accept=".txt,.md" 
+                onChange={handleTextFileChange}
+                ref={textInputRef}
+                className="hidden"
+                disabled={modelNotReady}
+                id="textFileUploadInput"
+              />
+               <button 
+                onClick={() => textInputRef.current?.click()} 
+                disabled={modelNotReady}
+                type="button"
+                className="w-full h-[46px] neo-border-sm bg-white p-3 flex items-center justify-center gap-3 font-black uppercase text-xs neo-shadow-sm active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+              >
+                <i className="fas fa-file-alt"></i> 
+                {textFile ? 'CHANGE DATA' : 'SELECT DATA'}
+              </button>
+            </div>
+          </div>
+          {textFile && <div className="text-[10px] font-bold text-neo-accent truncate uppercase tracking-tighter -mt-2">SELECTED: {textFile.name}</div>}
         </div>
+
+        {((wipState.imageMode === 'generate' && wipState.folderPath) || textFile) && (
+          <div className="bg-neo-muted p-3 neo-border-sm -rotate-1">
+            <div className="flex items-center gap-2 mb-1">
+              <i className="fas fa-exclamation-triangle text-neo-accent text-xs"></i>
+              <span className="text-[9px] font-black uppercase tracking-widest text-neo-accent">VISION_NOTICE</span>
+            </div>
+            <p className="text-[10px] font-bold text-neo-black/70 leading-relaxed">
+              For the AI to analyze images and PDFs, your local LLM must support <strong>vision/multimodal</strong> capabilities 
+              (e.g. LLaVA, Llama 3.2 Vision, Qwen-VL). Text-only models will ignore visual inputs.
+            </p>
+          </div>
+        )}
         
         <div className="relative">
           <Input
-            label="Core Message / Prompt for Ideas"
+            label="System Prompt"
             id="customPrompt"
             type="textarea"
-            rows={4}
+            rows={5}
             value={customPrompt}
             onChange={(e) => onCustomPromptChange(e.target.value)}
-            placeholder="e.g., Launching a new eco-friendly product..."
-            className="resize-none"
+            placeholder="DEFINE YOUR MISSION..."
+            className="!text-sm"
             required
             disabled={modelNotReady}
           />
-          <Button
+          <button
             onClick={onSuggestPrompt}
-            variant="secondary"
-            size="sm"
-            className="absolute top-[26px] right-1 text-xs"
-            isLoading={isSuggestingPrompt}
+            className="absolute top-0 right-0 bg-neo-secondary px-3 py-1 neo-border-sm text-[10px] font-black uppercase tracking-widest hover:bg-neo-accent hover:text-white transition-colors disabled:opacity-50"
             disabled={modelNotReady || !canvasTitle.trim() || isSuggestingPrompt || isGenerating}
-            title={!canvasTitle.trim() ? "Enter a Canvas Title first to enable suggestions" : "Suggest a prompt based on Canvas Title"}
+            title={!canvasTitle.trim() ? "IDENTITY REQUIRED" : "AI INSPIRATION"}
             type="button"
           >
-           <i className="fas fa-lightbulb mr-1"></i> AI Suggest
-          </Button>
+           {isSuggestingPrompt ? '...' : <><i className="fas fa-lightbulb mr-1"></i> SUGGEST</>}
+          </button>
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Select
+            label="Platform"
+            id="platformContext"
+            value={platformContext}
+            onChange={(e) => onPlatformContextChange(e.target.value as SocialPlatform)}
+            options={availablePlatforms.map(p => ({ value: p, label: p.toUpperCase() }))}
+            disabled={modelNotReady}
+            wrapperClassName="!mb-0"
+          />
 
-        <Select
-          label="General Social Platform Context"
-          id="platformContext"
-          value={platformContext}
-          onChange={(e) => onPlatformContextChange(e.target.value as SocialPlatform)}
-          // This will now correctly receive the full list from the parent component
-          options={availablePlatforms.map(p => ({ value: p, label: p }))}
-          disabled={modelNotReady}
-        />
+          <Select
+            label="Voice Tone"
+            id="tone"
+            value={tone}
+            onChange={(e) => onToneChange(e.target.value as CaptionTone)}
+            options={Object.values(CaptionTone).map(t => ({ value: t, label: t.toUpperCase() }))}
+            disabled={modelNotReady}
+            wrapperClassName="!mb-0"
+          />
 
-        <Select
-          label="Overall Tone of Voice"
-          id="tone"
-          value={tone}
-          onChange={(e) => onToneChange(e.target.value as CaptionTone)}
-          options={Object.values(CaptionTone).map(t => ({ value: t, label: t }))}
-          disabled={modelNotReady}
-        />
+          <Select
+            label="Caption Count"
+            id="numberOfIdeas"
+            value={numberOfIdeas}
+            onChange={(e) => onNumberOfIdeasChange(parseInt(e.target.value))}
+            options={[1, 2, 3, 4, 5].map(n => ({ value: n, label: `${n} OPTION${n > 1 ? 'S' : ''}` }))}
+            disabled={modelNotReady}
+            wrapperClassName="!mb-0"
+          />
+        </div>
         
-        <Input
-          label="Number of Initial Ideas to Generate"
-          id="numberOfIdeas"
-          type="number"
-          min="1"
-          max="5"
-          value={numberOfIdeas}
-          onChange={(e) => onNumberOfIdeasChange(parseInt(e.target.value))}
-          disabled={modelNotReady}
-        />
-
-        <Button 
-          onClick={onGenerateIdeas} 
-          isLoading={isGenerating || modelNotReady} 
-          disabled={isGenerating || modelNotReady || !customPrompt.trim()}
-          className="w-full"
-          size="lg"
-          type="button"
-        >
-          {modelNotReady ? 'Model Loading...' : isGenerating ? 'Generating Ideas...' : 'Generate Ideas'}
-        </Button>
+        <div className="pt-4">
+          <Button 
+            onClick={onGenerateIdeas} 
+            isLoading={isGenerating || modelNotReady} 
+            disabled={isGenerating || modelNotReady || !customPrompt.trim()}
+            className="w-full !py-6 !text-lg"
+            variant="primary"
+            type="button"
+          >
+            {modelNotReady 
+              ? 'BOOTING SYSTEM...' 
+              : isGenerating 
+                ? 'EXECUTING...' 
+                : (wipState.imageMode === 'generate' || !wipState.imageMode) 
+                  ? 'GENERATE MISSION' 
+                  : 'GENERATE CAPTIONS'
+            }
+          </Button>
+        </div>
       </div>
     </Card>
   );

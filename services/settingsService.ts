@@ -1,6 +1,6 @@
 import { FacebookSettings } from '../types';
 
-const baseURL = "https://steadysocial.dropletsofnature.com/userAPI.php";
+const baseURL = "http://localhost:3001";
 
 // --- Configuration ---
 // IMPORTANT: Replace this URL with the actual path to your api.php file on your server.
@@ -38,6 +38,17 @@ export const dbGetFacebookSettings = async (): Promise<FacebookSettings> => {
 
 export const dbSaveFacebookSettings = async (newSettings: Partial<FacebookSettings>): Promise<FacebookSettings> => {
     return apiRequest<FacebookSettings>('/settings/facebook', {
+        method: 'PUT',
+        body: JSON.stringify(newSettings),
+    });
+};
+
+export const dbGetAISettings = async (): Promise<any> => {
+    return apiRequest<any>('/settings/ai');
+};
+
+export const dbSaveAISettings = async (newSettings: any): Promise<any> => {
+    return apiRequest<any>('/settings/ai', {
         method: 'PUT',
         body: JSON.stringify(newSettings),
     });

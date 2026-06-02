@@ -1,19 +1,27 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
-import { 
-    FacebookSettings, 
-    FacebookPage,
-    FBPageInfo,
-    FBInsightValue,
-    FBInsightsData,
-    FBInsightsResponse,
-    FBPost,
-    FBPostsResponse,
-    FBManagedPagesResponse
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  ReactNode,
+  useEffect,
+} from 'react';
+
+import {
+  FacebookSettings,
+  FBPageInfo,
+  FBInsightValue,
+  FBPost,
+  FBPostsResponse,
 } from '../types';
-import { dbGetFacebookSettings } from '../services/settingsService'; // For fetching initial settings
 
+import { dbGetFacebookSettings } from '../services/settingsService';
 
-type FBAPIFunction = <T>(path: string, method?: 'get' | 'post' | 'delete', params?: Record<string, any>) => Promise<T>;
+type FBAPIFunction = <T>(
+  path: string,
+  method?: 'get' | 'post' | 'delete',
+  params?: Record<string, any>
+) => Promise<T>;
 
 interface KpiDataType {
   reach: number | null;
@@ -33,144 +41,242 @@ interface AnalyticsContextType {
   analyticsError: string | null;
   loadAnalytics: (fbApi: FBAPIFunction, forceRefresh?: boolean) => Promise<void>;
   lastFetchedPageId: string | null;
-  isLoadingFbSettings: boolean; 
+  isLoadingFbSettings: boolean;
 }
 
-const AnalyticsContext = createContext<AnalyticsContextType | undefined>(undefined);
+const AnalyticsContext = createContext<AnalyticsContextType | undefined>(
+  undefined
+);
 
-export const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+const EMPTY_KPI: KpiDataType = {
+  reach: null,
+  engagement: null,
+  postsPublished: null,
+  followers: null,
+  newFollowers: null,
+};
+
+const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [fbPageInfo, setFbPageInfo] = useState<FBPageInfo | null>(null);
   const [pageAccessToken, setPageAccessToken] = useState<string | null>(null);
-  const [kpiData, setKpiData] = useState<KpiDataType>({
-    reach: null, engagement: null, postsPublished: null, followers: null, newFollowers: null
-  });
-  const [engagementOverTime, setEngagementOverTime] = useState<FBInsightValue[]>([]);
+
+  const [kpiData, setKpiData] = useState<KpiDataType>(EMPTY_KPI);
+  const [engagementOverTime, setEngagementOverTime] = useState<FBInsightValue[]>(
+    []
+  );
   const [topPosts, setTopPosts] = useState<FBPost[]>([]);
+
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
-  const [lastFetchedPageId, setLastFetchedPageId] = useState<string | null>(null);
+  const [lastFetchedPageId, setLastFetchedPageId] = useState<string | null>(
+    null
+  );
+
   const [fbSettings, setFbSettings] = useState<FacebookSettings | null>(null);
   const [isLoadingFbSettings, setIsLoadingFbSettings] = useState(true);
 
-  // Fetch Facebook settings on mount
   useEffect(() => {
     const fetchSettings = async () => {
       setIsLoadingFbSettings(true);
+
       try {
         const settings = await dbGetFacebookSettings();
         setFbSettings(settings);
       } catch (err) {
-        console.error("AnalyticsContext: Failed to fetch Facebook settings", err);
-        setAnalyticsError("Could not load Facebook configuration for analytics.");
+        console.error(
+          'AnalyticsContext: Failed to fetch Facebook settings',
+          err
+        );
+        setAnalyticsError(
+          'Could not load Facebook configuration for analytics.'
+        );
       } finally {
         setIsLoadingFbSettings(false);
       }
     };
+
     fetchSettings();
   }, []);
 
-  const loadAnalytics = useCallback(async (
-    fbApi: FBAPIFunction,
-    forceRefresh: boolean = false
-  ) => {
-    if (isLoadingFbSettings || !fbSettings) {
-      // Do not proceed if settings are still loading or not available
-      if(!isLoadingFbSettings && !fbSettings) setAnalyticsError("Facebook settings not available for analytics.");
-      return;
-    }
+  const resetAnalyticsState = useCallback(() => {
+    setFbPageInfo(null);
+    setKpiData(EMPTY_KPI);
+    setEngagementOverTime([]);
+    setTopPosts([]);
+    setPageAccessToken(null);
+  }, []);
 
-    if (!fbSettings.pageId) {
-      setAnalyticsError("Facebook Page ID not configured in settings.");
-      // Reset states if pageId is missing
-      setFbPageInfo(null);
-      setKpiData({ reach: null, engagement: null, postsPublished: null, followers: null, newFollowers: null });
-      setEngagementOverTime([]);
-      setTopPosts([]);
-      setPageAccessToken(null);
-      return;
-    }
+  const getPostEngagement = (post: any): number => {
+    const reactions = post?.reactions?.summary?.total_count || 0;
+    const comments = post?.comments?.summary?.total_count || 0;
+    const shares = post?.shares?.count || 0;
 
-    if (!forceRefresh && lastFetchedPageId === fbSettings.pageId && fbPageInfo) {
-      return;
-    }
+    return reactions + comments + shares;
+  };
 
-    setIsLoadingAnalytics(true);
-    setAnalyticsError(null);
-    let currentToken = (lastFetchedPageId === fbSettings.pageId && !forceRefresh) ? pageAccessToken : null;
+  const buildEngagementChartData = (posts: any[]): FBInsightValue[] => {
+    const engagementByDate: Record<string, number> = {};
 
-    try {
-      if (!currentToken || forceRefresh || lastFetchedPageId !== fbSettings.pageId) {
-        const accountsResponse = await fbApi<FBManagedPagesResponse>('/me/accounts?fields=id,name,access_token');
-        const targetPage = accountsResponse.data.find(p => p.id === fbSettings.pageId);
-        if (targetPage?.access_token) {
-          currentToken = targetPage.access_token;
-          setPageAccessToken(currentToken);
-        } else {
-          throw new Error("Page Access Token not found. Ensure page is managed and permissions granted.");
-        }
+    posts.forEach((post) => {
+      if (!post?.created_time) return;
+
+      const engagement = getPostEngagement(post);
+      const dateKey = new Date(post.created_time).toISOString().slice(0, 10);
+
+      if (!engagementByDate[dateKey]) {
+        engagementByDate[dateKey] = 0;
       }
 
-      if (!currentToken) throw new Error("Failed to obtain Page Access Token.");
-      
-      setLastFetchedPageId(fbSettings.pageId);
+      engagementByDate[dateKey] += engagement;
+    });
 
-      const pageInfoPromise = fbApi<FBPageInfo>(`/${fbSettings.pageId}?fields=name,fan_count,picture.type(large)&access_token=${currentToken}`);
-      const insightsPromise = fbApi<FBInsightsResponse>(
-        `/${fbSettings.pageId}/insights?metric=page_impressions_unique,page_post_engagements,page_fans_adds_unique&period=day&date_preset=last_30_days&access_token=${currentToken}`
+    return Object.entries(engagementByDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, value]) => ({
+        value,
+        end_time: `${date}T00:00:00+0000`,
+      }));
+  };
+
+  const loadAnalytics = useCallback(
+    async (fbApi: FBAPIFunction, forceRefresh: boolean = false) => {
+      if (isLoadingFbSettings) return;
+
+      if (!fbSettings) {
+        setAnalyticsError('Facebook settings not available for analytics.');
+        return;
+      }
+
+      if (!fbSettings.pageId) {
+        setAnalyticsError('Facebook Page ID not configured in settings.');
+        resetAnalyticsState();
+        return;
+      }
+
+      if (!fbSettings.accessToken) {
+        setAnalyticsError(
+          'Page Access Token not found. Please configure it in Settings.'
+        );
+        resetAnalyticsState();
+        return;
+      }
+
+      if (
+        !forceRefresh &&
+        lastFetchedPageId === fbSettings.pageId &&
+        fbPageInfo
+      ) {
+        return;
+      }
+
+      setIsLoadingAnalytics(true);
+      setAnalyticsError(null);
+
+      const pageId = fbSettings.pageId;
+      const currentToken = fbSettings.accessToken;
+
+      const thirtyDaysAgo = Math.floor(
+        (Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000
       );
-      const postsCountPromise = fbApi<FBPostsResponse>(
-        `/${fbSettings.pageId}/published_posts?limit=100&since=${Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000)}&access_token=${currentToken}`
-      );
-      const latestPostsPromise = fbApi<FBPostsResponse>(
-          `/${fbSettings.pageId}/posts?fields=id,message,created_time,permalink_url,attachments{media,subattachments,type,url},insights.metric(post_impressions_unique,post_engaged_users).period(lifetime)&limit=5&access_token=${currentToken}`
-      );
 
-      const [pageInfoData, insightsData, postsCountData, latestPostsData] = await Promise.all([
-        pageInfoPromise, insightsPromise, postsCountPromise, latestPostsPromise
-      ]);
+      try {
+        setPageAccessToken(currentToken);
+        setLastFetchedPageId(pageId);
 
-      setFbPageInfo(pageInfoData);
-      setTopPosts(latestPostsData.data || []);
+        const pageInfoPromise = fbApi<FBPageInfo>(`/${pageId}`, 'get', {
+          fields: [
+            'id',
+            'name',
+            'fan_count',
+            'followers_count',
+            'picture.type(large)',
+          ].join(','),
+          access_token: currentToken,
+        });
 
-      let totalReach = 0, totalEngagement = 0, totalNewFollowers = 0;
-      let dailyEngagementValues: FBInsightValue[] = [];
+        const postsPromise = fbApi<FBPostsResponse>(
+          `/${pageId}/posts`,
+          'get',
+          {
+            fields: [
+              'id',
+              'message',
+              'created_time',
+              'permalink_url',
+              'attachments{media,subattachments,type,url}',
+              'reactions.summary(true).limit(0)',
+              'comments.summary(true).limit(0)',
+              'shares',
+            ].join(','),
+            limit: 100,
+            since: thirtyDaysAgo,
+            access_token: currentToken,
+          }
+        ).catch((err) => {
+          console.warn('Posts analytics request failed:', err);
+          return { data: [] } as FBPostsResponse;
+        });
 
-      insightsData.data.forEach(metric => {
-        if (metric.name === 'page_impressions_unique' && metric.values) {
-          totalReach = metric.values.reduce((sum, val) => sum + (typeof val.value === 'number' ? val.value : 0), 0);
-        }
-        if (metric.name === 'page_post_engagements' && metric.values) {
-          totalEngagement = metric.values.reduce((sum, val) => sum + (typeof val.value === 'number' ? val.value : 0), 0);
-          dailyEngagementValues = metric.values.filter(v => typeof v.value === 'number');
-        }
-        if (metric.name === 'page_fans_adds_unique' && metric.values) {
-          totalNewFollowers = metric.values.reduce((sum, val) => sum + (typeof val.value === 'number' ? val.value : 0), 0);
-        }
-      });
-      
-      setEngagementOverTime(dailyEngagementValues);
-      setKpiData({
-        reach: totalReach, engagement: totalEngagement, postsPublished: postsCountData.data?.length || 0,
-        followers: pageInfoData.fan_count || 0, newFollowers: totalNewFollowers,
-      });
+        const [pageInfoData, postsData] = await Promise.all([
+          pageInfoPromise,
+          postsPromise,
+        ]);
 
-    } catch (err: any) {
-      console.error("Error loading Facebook analytics:", err);
-      setAnalyticsError(err.message || "An unknown error occurred while fetching analytics.");
-      // Reset data on error
-      setFbPageInfo(null);
-      setKpiData({ reach: null, engagement: null, postsPublished: null, followers: null, newFollowers: null });
-      setEngagementOverTime([]);
-      setTopPosts([]);
-      setPageAccessToken(null);
-    } finally {
-      setIsLoadingAnalytics(false);
-    }
-  }, [pageAccessToken, lastFetchedPageId, fbPageInfo, fbSettings, isLoadingFbSettings]);
+        const posts = postsData.data || [];
+
+        const totalEngagement = posts.reduce((total, post: any) => {
+          return total + getPostEngagement(post);
+        }, 0);
+
+        const dailyEngagementValues = buildEngagementChartData(posts);
+
+        const topFivePosts = [...posts]
+          .sort((a: any, b: any) => getPostEngagement(b) - getPostEngagement(a))
+          .slice(0, 5);
+
+        setFbPageInfo(pageInfoData);
+        setTopPosts(topFivePosts);
+        setEngagementOverTime(dailyEngagementValues);
+
+        setKpiData({
+          reach: 0,
+          engagement: totalEngagement,
+          postsPublished: posts.length,
+          followers: pageInfoData.followers_count || pageInfoData.fan_count || 0,
+          newFollowers: 0,
+        });
+      } catch (err: any) {
+        console.error('Error loading Facebook analytics:', err);
+
+        setAnalyticsError(
+          err?.message ||
+            'An unknown error occurred while fetching analytics.'
+        );
+
+        resetAnalyticsState();
+      } finally {
+        setIsLoadingAnalytics(false);
+      }
+    },
+    [
+      fbSettings,
+      fbPageInfo,
+      lastFetchedPageId,
+      isLoadingFbSettings,
+      resetAnalyticsState,
+    ]
+  );
 
   const contextValue: AnalyticsContextType = {
-    fbPageInfo, kpiData, engagementOverTime, topPosts, pageAccessToken,
-    isLoadingAnalytics, analyticsError, loadAnalytics, lastFetchedPageId,
+    fbPageInfo,
+    kpiData,
+    engagementOverTime,
+    topPosts,
+    pageAccessToken,
+    isLoadingAnalytics,
+    analyticsError,
+    loadAnalytics,
+    lastFetchedPageId,
     isLoadingFbSettings,
   };
 
@@ -181,10 +287,14 @@ export const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children 
   );
 };
 
+export { AnalyticsProvider };
+
 export const useAnalytics = (): AnalyticsContextType => {
   const context = useContext(AnalyticsContext);
+
   if (context === undefined) {
     throw new Error('useAnalytics must be used within an AnalyticsProvider');
   }
+
   return context;
 };

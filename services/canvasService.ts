@@ -2,7 +2,7 @@ import { ContentCanvas, CanvasItem, CanvasStatus, SocialPlatform, WIPState } fro
 
 // --- Configuration ---
 // IMPORTANT: Replace this URL with the actual path to your api.php file on your server.
-const API_BASE_URL = 'https://steadysocial.dropletsofnature.com/canvasAPI.php'; 
+const API_BASE_URL = 'http://localhost:3001'; 
 
 
 // --- Helper for API Requests ---
@@ -51,7 +51,7 @@ export const dbCreateCanvas = async (
     initialItems: CanvasItem[],
     wipSnapshot?: Omit<WIPState, 'overallImageFile' | 'overallTextFile' | 'activeCanvasIdForWIP'>
 ): Promise<ContentCanvas> => {
-    const body = { ...canvasData, initialItems, wipSnapshot: wipSnapshot?.parsedRawItems };
+    const body = { ...canvasData, initialItems, wipStateSnapshot: wipSnapshot };
     
     return apiRequest<ContentCanvas>('/canvases', {
         method: 'POST',

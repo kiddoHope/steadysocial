@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+dist_electron
+electron
+steadysocial-mcp-server
+public/skills
+scripts
+dist
+skills
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

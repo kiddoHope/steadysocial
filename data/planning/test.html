@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>What is an AI Agent? — A Neo-Brutalist Presentation</title>
+    <!-- Google Fonts: Space Grotesk -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;900&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    
+    <style>
+        /* Neo-Brutalist Custom Global Styles */
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background-color: #FFFDF5;
+            color: #000000;
+        }
+
+        /* Custom Text Stroke Styling */
+        .text-stroke {
+            -webkit-text-stroke: 3px #000000;
+            color: transparent;
+        }
+
+        /* Graph Paper Grid Background */
+        .bg-graph-grid {
+            background-size: 40px 40px;
+            background-image: 
+                linear-gradient(to right, rgba(0, 0, 0, 0.1) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+        }
+
+        /* Halftone Dot Matrix Background Pattern */
+        .bg-halftone-dots {
+            background-image: radial-gradient(#000000 2px, transparent 2px);
+            background-size: 24px 24px;
+        }
+
+        /* Slow Spin Animation for Decorative Primitives */
+        @keyframes spin-slow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+            animation: spin-slow 12s linear infinite;
+        }
+
+        /* Infinite Marquee Ribbon Text Translation */
+        @keyframes marquee {
+            0% { transform: translateX(0%); }
+            100% { transform: translateX(-50%); }
+        }
+        .animate-marquee {
+            animation: marquee 20s linear infinite;
+        }
+
+        /* Accessibility: Respect Reduced Motion */
+        @media (prefers-reduced-motion: reduce) {
+            .animate-spin-slow, .animate-marquee, .transition-all {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+    
+    <script>
+        // Inject Custom Neo-Brutalist Design Tokens into Tailwind Configuration
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        neo: {
+                            bg: '#FFFDF5',
+                            ink: '#000000',
+                            accent: '#FF6B6B',     /* Hot Red */
+                            secondary: '#FFD93D',  /* Vivid Yellow */
+                            muted: '#C4B5FD',      /* Soft Violet */
+                            white: '#FFFFFF'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-neo-bg bg-graph-grid min-h-screen flex flex-col justify-between p-4 sm:p-6 overflow-hidden select-none">
+
+    <!-- Top Navigation Header / Presentation Progress Tracker -->
+    <header class="w-full max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center border-4 border-black bg-neo-white shadow-[6px_6px_0px_0px_#000] p-4 mb-4 gap-4">
+        <div class="bg-neo-accent border-4 border-black p-2 font-black text-xl uppercase tracking-wider -rotate-1 shadow-[4px_4px_0px_0px_#000]">
+            DECK // COGNITIVE_AGENTS
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="font-black uppercase tracking-widest text-sm">Progress:</span>
+            <div class="w-48 h-6 border-4 border-black bg-neo-bg relative overflow-hidden">
+                <div id="progress-bar" class="h-full bg-neo-secondary border-r-4 border-black transition-all duration-300 ease-out" style="width: 20%;"></div>
+            </div>
+            <span id="slide-indicator" class="font-black text-lg bg-neo-muted border-4 border-black px-2 py-0.5">1/5</span>
+        </div>
+    </header>
+
+    <!-- Main Presentation Deck Frame Viewport -->
+    <main class="flex-grow w-full max-w-7xl mx-auto relative flex items-center justify-center min-h-[500px]">
+        
+        <!-- ================= SLIDE 1: THE HERO TITLE ================= -->
+        <section id="slide-1" class="slide-element w-full grid grid-cols-1 lg:grid-cols-12 border-8 border-black bg-neo-white shadow-[16px_16px_0px_0px_#000] min-h-[550px] relative transition-all duration-200">
+            <!-- Left Branding Column -->
+            <div class="lg:col-span-7 p-6 sm:p-12 flex flex-col justify-between relative overflow-hidden bg-halftone-dots bg-opacity-5">
+                <div class="absolute -top-10 -left-10 w-40 h-40 bg-neo-secondary border-4 border-black rounded-full mix-blend-multiply opacity-40"></div>
+                
+                <!-- Rotating Dynamic Sticker Badge -->
+                <div class="absolute top-6 right-6 bg-neo-muted border-4 border-black font-black uppercase text-xs tracking-widest px-4 py-2 rotate-6 shadow-[4px_4px_0px_0px_#000] hover:rotate-12 transition-transform duration-150 cursor-pointer">
+                    ⚡ NEW PARADIGM
+                </div>
+
+                <div class="space-y-4 z-10 my-auto">
+                    <h2 class="text-xs sm:text-sm font-black tracking-[0.3em] uppercase text-neo-accent bg-black inline-block px-2 py-1 mb-2">INTRODUCING AUTONOMY</h2>
+                    <h1 class="text-5xl sm:text-7xl xl:text-8xl font-black tracking-tighter leading-none uppercase mb-2">
+                        WHAT IS AN <br><span class="text-neo-accent bg-neo-secondary border-4 border-black px-2 inline-block my-1 transform -rotate-1 shadow-[6px_6px_0px_0px_#000]">AI AGENT?</span>
+                    </h1>
+                    <div class="text-stroke text-4xl sm:text-6xl font-black tracking-tighter uppercase leading-none block">
+                        BEYOND THE CHATBOT
+                    </div>
+                </div>
+
+                <p class="font-bold text-lg sm:text-xl border-t-4 border-black pt-4 mt-6 max-w-xl">
+                    An architectural blueprint exploring software systems engineered to perceive environment matrices, formulate rationale, and execute terminal actions autonomously.
+                </p>
+            </div>
+
+            <!-- Right Visual Complexity Column -->
+            <div class="lg:col-span-5 bg-neo-secondary border-t-8 lg:border-t-0 lg:border-l-8 border-black p-8 flex flex-col items-center justify-center relative overflow-hidden">
+                <!-- Large Rotating Primitive Star -->
+                <div class="animate-spin-slow cursor-wait p-2">
+                    <svg class="w-48 h-48 sm:w-64 sm:h-64 filter drop-shadow-[8px_8px_0px_rgba(0,0,0,1)]" viewBox="0 0 24 24" fill="#FF6B6B" stroke="#000000" stroke-width="1.5">
+                        <path d="M12 0L14.6 9.4L24 12L14.6 14.6L12 24L9.4 14.6L0 12L9.4 9.4L12 0Z"/>
+                    </svg>
+                </div>
+                <!-- Absolutely Positioned Explanatory Tag Sticker -->
+                <div class="absolute bottom-8 left-8 right-8 bg-neo-white border-4 border-black p-4 shadow-[8px_8px_0px_0px_#000] -rotate-2">
+                    <div class="font-black text-sm uppercase tracking-wide mb-1 flex items-center gap-2">
+                        <span class="w-3 h-3 bg-green-500 border-2 border-black rounded-full inline-block"></span> CORE ARCHITECTURE
+                    </div>
+                    <p class="text-sm font-bold text-gray-800">Software designed with an execution loop containing sensory inputs and programmatic effectors.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SLIDE 2: THE PARADIGM SHIFT ================= -->
+        <section id="slide-2" class="slide-element w-full hidden grid grid-cols-1 lg:grid-cols-12 border-8 border-black bg-neo-white shadow-[16px_16px_0px_0px_#000] min-h-[550px] transition-all duration-200">
+            <div class="lg:col-span-5 bg-neo-muted p-8 flex flex-col justify-between border-b-8 lg:border-b-0 lg:border-r-8 border-black relative">
+                <div class="bg-black text-neo-white font-black text-4xl p-4 transform -rotate-2 shadow-[8px_8px_0px_0px_#FF6B6B]">
+                    THE SHIFT
+                </div>
+                <div class="my-auto py-8">
+                    <h2 class="text-4xl sm:text-5xl font-black uppercase tracking-tight leading-none mb-4">Linear Tools vs. Agentic Systems</h2>
+                    <p class="font-bold text-lg">Traditional applications require click-by-click human prompts. AI Agents flip the paradigm: you provide a declarative objective, and the agent engineers the execution sequence path.</p>
+                </div>
+                <div class="border-4 border-black bg-neo-white p-3 font-black uppercase tracking-wider text-center shadow-[4px_4px_0px_0px_#000]">
+                    System Mutation Level: Critical
+                </div>
+            </div>
+            
+            <div class="lg:col-span-7 p-6 sm:p-12 flex flex-col justify-center gap-6">
+                <!-- Comparative Blueprint Grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <!-- Standard LLM Chatbot Card -->
+                    <div class="border-4 border-black p-6 bg-neo-white shadow-[6px_6px_0px_0px_#000] hover:-translate-y-1 hover:shadow-[10px_10px_0px_0px_#000] transition-all duration-200">
+                        <div class="w-10 h-10 border-4 border-black bg-neo-accent flex items-center justify-center font-black mb-4">1</div>
+                        <h3 class="text-xl font-black uppercase tracking-tight mb-2">Standard Chatbot</h3>
+                        <p class="text-sm font-bold text-gray-700 mb-2">Passive architecture waiting entirely for human prompts. Operates strictly as a stateless text predictor machine.</p>
+                        <span class="inline-block text-xs font-black bg-gray-200 border-2 border-black px-2 py-0.5 uppercase">Stateless Loop</span>
+                    </div>
+
+                    <!-- Autonomous AI Agent Card -->
+                    <div class="border-4 border-black p-6 bg-neo-secondary shadow-[6px_6px_0px_0px_#000] hover:-translate-y-1 hover:shadow-[10px_10px_0px_0px_#000] transition-all duration-200 transform rotate-1">
+                        <div class="w-10 h-10 border-4 border-black bg-black text-neo-white flex items-center justify-center font-black mb-4">2</div>
+                        <h3 class="text-xl font-black uppercase tracking-tight mb-2">Autonomous Agent</h3>
+                        <p class="text-sm font-bold text-gray-900 mb-2">Active runtime environment that iterates workflows via multi-step self-reflection loops and third-party tools.</p>
+                        <span class="inline-block text-xs font-black bg-neo-accent text-white border-2 border-black px-2 py-0.5 uppercase">Stateful Execution</span>
+                    </div>
+                </div>
+
+                <!-- Asymmetric Highlight Callout -->
+                <div class="border-4 border-black p-4 bg-neo-bg shadow-[8px_8px_0px_0px_#000] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-2">
+                    <div>
+                        <div class="font-black uppercase tracking-wide text-sm text-neo-accent">The Key Vector Indicator:</div>
+                        <div class="font-bold text-md">Agents accept an <strong>Objective</strong> rather than single instructions.</div>
+                    </div>
+                    <svg class="w-8 h-8 shrink-0 stroke-[3.5px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="square" stroke-linejoin="miter" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SLIDE 3: ANATOMY OF AN AGENT ================= -->
+        <section id="slide-3" class="slide-element w-full hidden flex flex-col border-8 border-black bg-neo-white shadow-[16px_16px_0px_0px_#000] min-h-[550px] transition-all duration-200 p-6 sm:p-10">
+            <div class="mb-6">
+                <span class="bg-neo-secondary border-4 border-black px-3 py-1 font-black text-sm uppercase tracking-widest shadow-[4px_4px_0px_0px_#000]">STRUCTURAL ENGINE DECONSTRUCTION</span>
+                <h2 class="text-4xl sm:text-5xl font-black uppercase tracking-tight leading-none mt-4">The Four Pillars of Agent Anatomy</h2>
+            </div>
+
+            <!-- Staggered Layout Matrix Rows -->
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 my-auto">
+                <!-- Pillar 1 -->
+                <div class="border-4 border-black bg-neo-bg p-5 shadow-[6px_6px_0px_0px_#000] hover:shadow-[12px_12px_0px_0px_#000] hover:-translate-y-1 transitions-all duration-200">
+                    <div class="h-12 w-12 border-4 border-black bg-neo-accent p-2 mb-4 flex items-center justify-center">
+                        <svg class="w-8 h-8 stroke-[3.5px] text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="square" stroke-linejoin="miter" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                    </div>
+                    <h3 class="font-black text-xl uppercase tracking-tight mb-2">1. Brain (LLM)</h3>
+                    <p class="text-sm font-bold text-gray-700">The core engine responsible for routing processing strings, semantic evaluation, prompt assembly, and decision policies.</p>
+                </div>
+
+                <!-- Pillar 2 -->
+                <div class="border-4 border-black bg-neo-bg p-5 shadow-[6px_6px_0px_0px_#000] hover:shadow-[12px_12px_0px_0px_#000] hover:-translate-y-1 transitions-all duration-200 transform md:rotate-1">
+                    <div class="h-12 w-12 border-4 border-black bg-neo-secondary p-2 mb-4 flex items-center justify-center">
+                        <svg class="w-8 h-8 stroke-[3.5px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="square" stroke-linejoin="miter" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <h3 class="font-black text-xl uppercase tracking-tight mb-2">2. Planning</h3>
+                    <p class="text-sm font-bold text-gray-700">Deconstructs complex high-level multi-step requirements into manageable task sub-routines via reflection loops.</p>
+                </div>
+
+                <!-- Pillar 3 -->
+                <div class="border-4 border-black bg-neo-bg p-5 shadow-[6px_6px_0px_0px_#000] hover:shadow-[12px_12px_0px_0px_#000] hover:-translate-y-1 transitions-all duration-200 transform md:-rotate-1">
+                    <div class="h-12 w-12 border-4 border-black bg-neo-muted p-2 mb-4 flex items-center justify-center">
+                        <svg class="w-8 h-8 stroke-[3.5px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="square" stroke-linejoin="miter" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                    </div>
+                    <h3 class="font-black text-xl uppercase tracking-tight mb-2">3. Memory</h3>
+                    <p class="text-sm font-bold text-gray-700">Utilizes in-context processing memory alongside external vector databases for long-term multi-session retention storage.</p>
+                </div>
+
+                <!-- Pillar 4 -->
+                <div class="border-4 border-black bg-neo-bg p-5 shadow-[6px_6px_0px_0px_#000] hover:shadow-[12px_12px_0px_0px_#000] hover:-translate-y-1 transitions-all duration-200 transform md:rotate-2">
+                    <div class="h-12 w-12 border-4 border-black bg-neo-white p-2 mb-4 flex items-center justify-center">
+                        <svg class="w-8 h-8 stroke-[3.5px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="square" stroke-linejoin="miter" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+                    </div>
+                    <h3 class="font-black text-xl uppercase tracking-tight mb-2">4. Tools</h3>
+                    <p class="text-sm font-bold text-gray-700">External target execution tools including custom API endpoints, web query scrapers, or file sandboxes.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SLIDE 4: THE CORE AGENTIC LOOP ================= -->
+        <section id="slide-4" class="slide-element w-full hidden grid grid-cols-1 lg:grid-cols-12 border-8 border-black bg-neo-white shadow-[16px_16px_0px_0px_#000] min-h-[550px] transition-all duration-200">
+            <div class="lg:col-span-8 p-6 sm:p-12 flex flex-col justify-between">
+                <div>
+                    <span class="bg-neo-accent text-white border-4 border-black px-2 py-0.5 font-black text-xs uppercase tracking-widest">STATE-FLOW MATRIX</span>
+                    <h2 class="text-4xl sm:text-5xl font-black uppercase tracking-tight leading-none mt-4 mb-6">How Agents Execute Actions</h2>
+                    
+                    <!-- Execution Step Pipeline Stack -->
+                    <div class="space-y-4">
+                        <div class="border-4 border-black p-4 bg-neo-bg flex items-center gap-4 shadow-[4px_4px_0px_0px_#000]">
+                            <div class="bg-neo-secondary border-4 border-black font-black w-8 h-8 flex items-center justify-center shrink-0">P</div>
+                            <div>
+                                <span class="font-black uppercase text-sm block">PERCEIVE (Sensing Input)</span>
+                                <span class="text-xs font-bold text-gray-600">The agent ingests standard data payloads, webhook triggers, environment frames, or custom text instructions.</span>
+                            </div>
+                        </div>
+                        <div class="border-4 border-black p-4 bg-neo-bg flex items-center gap-4 shadow-[4px_4px_0px_0px_#000] transform rotate-0.5">
+                            <div class="bg-neo-muted border-4 border-black font-black w-8 h-8 flex items-center justify-center shrink-0">R</div>
+                            <div>
+                                <span class="font-black uppercase text-sm block">REASON (Cognitive Evaluation)</span>
+                                <span class="text-xs font-bold text-gray-600">Evaluates context weights against stored metrics. Assembles execution strategies using ReAct patterns or tree-of-thought methodologies.</span>
+                            </div>
+                        </div>
+                        <div class="border-4 border-black p-4 bg-neo-bg flex items-center gap-4 shadow-[4px_4px_0px_0px_#000]">
+                            <div class="bg-neo-accent text-white border-4 border-black font-black w-8 h-8 flex items-center justify-center shrink-0">A</div>
+                            <div>
+                                <span class="font-black uppercase text-sm block">ACT (Terminal Dispatch)</span>
+                                <span class="text-xs font-bold text-gray-600">Dispatches network API requests, commits database transactions, updates status records, and checks outputs before terminating loops.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Micro Warning Callout Box -->
+                <div class="border-4 border-black bg-neo-secondary p-3 font-bold text-xs mt-6">
+                    ⚠️ <strong>CRITICAL DATA:</strong> If the verification pass fails after the ACT state, the agent routes output logs directly back into the PERCEIVE vector block to execute self-correction passes.
+                </div>
+            </div>
+
+            <!-- Side Aesthetic Technical Specs Table -->
+            <div class="lg:col-span-4 border-t-8 lg:border-t-0 lg:border-l-8 border-black bg-neo-bg p-6 flex flex-col justify-between">
+                <div class="font-black text-xl uppercase tracking-wider border-b-4 border-black pb-2 mb-4">
+                    [ SYSTEM_CAPS ]
+                </div>
+                <table class="w-full text-left font-bold text-sm border-collapse">
+                    <tbody>
+                        <tr class="border-b-2 border-black"><td class="py-2 text-gray-600 uppercase">Loop Vector</td><td class="py-2 font-black text-right">Autonomous / Cyclic</td></tr>
+                        <tr class="border-b-2 border-black"><td class="py-2 text-gray-600 uppercase">Tool Bindings</td><td class="py-2 font-black text-right">Dynamic OpenAPI</td></tr>
+                        <tr class="border-b-2 border-black"><td class="py-2 text-gray-600 uppercase">Memory Sink</td><td class="py-2 font-black text-right">Episodic + Vector</td></tr>
+                        <tr class="border-b-2 border-black"><td class="py-2 text-gray-600 uppercase">Human Presence</td><td class="py-2 font-black text-right">Optional / Gatekept</td></tr>
+                    </tbody>
+                </table>
+                <div class="mt-8 border-4 border-black p-4 bg-neo-white text-center font-black uppercase text-xs tracking-widest shadow-[4px_4px_0px_0px_#000]">
+                    SYSTEM STATUS: ACTIVE
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SLIDE 5: REAL-WORLD SYSTEMS ================= -->
+        <section id="slide-5" class="slide-element w-full hidden flex flex-col justify-between border-8 border-black bg-neo-white shadow-[16px_16px_0px_0px_#000] min-h-[550px] transition-all duration-200 overflow-hidden">
+            <div class="p-6 sm:p-12">
+                <span class="bg-neo-muted border-4 border-black px-2 py-0.5 font-black text-xs uppercase tracking-widest shadow-[4px_4px_0px_0px_#000]">OPERATIONAL IMPLEMENTATIONS</span>
+                <h2 class="text-4xl sm:text-6xl font-black uppercase tracking-tight leading-none mt-4 mb-8">Agents At Work</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- Framework Card 1 -->
+                    <div class="border-4 border-black p-6 bg-neo-white shadow-[6px_6px_0px_0px_#000]">
+                        <h3 class="font-black text-2xl uppercase tracking-tight mb-2">Dev Agents</h3>
+                        <p class="text-sm font-bold text-gray-700">Autonomous engineering machines capable of scanning full code repositories, locating application runtime regressions, writing patches, and dispatching PR commits entirely on their own.</p>
+                    </div>
+                    <!-- Framework Card 2 -->
+                    <div class="border-4 border-black p-6 bg-neo-secondary shadow-[6px_6px_0px_0px_#000] transform -rotate-1">
+                        <h3 class="font-black text-2xl uppercase tracking-tight mb-2">Enterprise Ops</h3>
+                        <p class="text-sm font-bold text-gray-900">Multi-agent worker pools processing localized operations workflows like incoming financial invoicing records, system exception triages, and infrastructure inventory routing syncs.</p>
+                    </div>
+                    <!-- Framework Card 3 -->
+                    <div class="border-4 border-black p-6 bg-neo-white shadow-[6px_6px_0px_0px_#000] transform rotate-1">
+                        <h3 class="font-black text-2xl uppercase tracking-tight mb-2">Research Swarms</h3>
+                        <p class="text-sm font-bold text-gray-700">Cooperating sub-agents scanning academic papers, normalizing data, and outputting cross-referenced trend digests based on targeted structural criteria inputs.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom High Energy Loop Ribbon Marquee -->
+            <div class="w-full bg-black py-4 overflow-hidden border-t-8 border-black flex items-center select-none whitespace-nowrap">
+                <div class="animate-marquee inline-block font-black text-neo-secondary text-2xl tracking-widest uppercase">
+                    AUTONOMY • COGNITION • REFLECTION MAPS • VECTOR DEPLOYMENT • ACTION TOOLS • PERCEIVE REASON ACT LOOP • AUTONOMY • COGNITION • REFLECTION MAPS • VECTOR DEPLOYMENT • ACTION TOOLS • PERCEIVE REASON ACT LOOP • 
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Bottom Navigation Control Controls -->
+    <footer class="w-full max-w-7xl mx-auto flex justify-between items-center mt-4">
+        <!-- Previous Slide Button -->
+        <button id="prev-btn" aria-label="Previous Slide" class="h-14 px-6 border-4 border-black bg-neo-white font-black uppercase tracking-wider shadow-[4px_4px_0px_0px_#000] hover:bg-neo-bg transition-all duration-100 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:opacity-40 disabled:pointer-events-none">
+            ← BACK
+        </button>
+        
+        <div class="hidden sm:block font-bold text-sm bg-neo-white border-4 border-black px-4 py-2 shadow-[4px_4px_0px_0px_#000] uppercase tracking-widest">
+            Use <kbd class="bg-black text-white px-1 font-black">←</kbd> and <kbd class="bg-black text-white px-1 font-black">→</kbd> Arrow Keys
+        </div>
+
+        <!-- Next Slide Button -->
+        <button id="next-btn" aria-label="Next Slide" class="h-14 px-6 border-4 border-black bg-neo-secondary font-black uppercase tracking-wider shadow-[4px_4px_0px_0px_#000] hover:bg-yellow-300 transition-all duration-100 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none">
+            NEXT →
+        </button>
+    </footer>
+
+    <!-- Presentation Engine Architecture Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            let currentSlide = 1;
+            const totalSlides = 5;
+
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            const slideIndicator = document.getElementById('slide-indicator');
+            const progressBar = document.getElementById('progress-bar');
+
+            // Primary visibility sync function
+            function updateSlides() {
+                // Hide all standard slide section frames
+                document.querySelectorAll('.slide-element').forEach(slide => {
+                    slide.classList.add('hidden');
+                });
+
+                // Target and illuminate active slide index pointer frame
+                const targetSlide = document.getElementById(`slide-${currentSlide}`);
+                if (targetSlide) {
+                    targetSlide.classList.remove('hidden');
+                }
+
+                // Mutate global presentation state trackers
+                slideIndicator.textContent = `${currentSlide}/${totalSlides}`;
+                progressBar.style.width = `${(currentSlide / totalSlides) * 100}%`;
+
+                // Handle interactive control matrix boundaries
+                prevBtn.disabled = (currentSlide === 1);
+                
+                if (currentSlide === totalSlides) {
+                    nextBtn.textContent = 'RESET ↺';
+                    nextBtn.classList.remove('bg-neo-secondary');
+                    nextBtn.classList.add('bg-neo-accent', 'text-white');
+                } else {
+                    nextBtn.textContent = 'NEXT →';
+                    nextBtn.classList.remove('bg-neo-accent', 'text-white');
+                    nextBtn.classList.add('bg-neo-secondary');
+                }
+            }
+
+            // Next / Reset action handler 
+            function handleNext() {
+                if (currentSlide < totalSlides) {
+                    currentSlide++;
+                } else {
+                    currentSlide = 1; // Infinite loop wrap reset feature
+                }
+                updateSlides();
+            }
+
+            // Previous step action handler
+            function handlePrev() {
+                if (currentSlide > 1) {
+                    currentSlide--;
+                    updateSlides();
+                }
+            }
+
+            // Register hardware interaction click listeners
+            nextBtn.addEventListener('click', handleNext);
+            prevBtn.addEventListener('click', handlePrev);
+
+            // Register system-level keyboard matrix overrides
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowRight' || e.key === ' ') {
+                    e.preventDefault();
+                    handleNext();
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    handlePrev();
+                }
+            });
+
+            // Initialize active viewport framework parameters
+            updateSlides();
+        });
+    </script>
+</body>
+</html>

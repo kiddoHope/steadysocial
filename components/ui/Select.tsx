@@ -1,15 +1,11 @@
 import React from 'react';
 
-// Explicitly define placeholder in props for custom logic
-// Omit 'placeholder' from native attributes if it was ever considered part of them,
-// but React.SelectHTMLAttributes<HTMLSelectElement> doesn't have it.
-// The main goal is to type `placeholder` for our component's use and not spread it to the DOM if it's not a valid attribute.
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
   error?: string;
   options: { value: string | number; label: string }[];
   wrapperClassName?: string;
-  placeholder?: string; // For the first disabled option logic
+  placeholder?: string;
 }
 
 const Select: React.FC<SelectProps> = ({ 
@@ -19,33 +15,43 @@ const Select: React.FC<SelectProps> = ({
   options, 
   className = '', 
   wrapperClassName = '', 
-  placeholder, // Destructure placeholder for logical use
-  ...nativeSelectProps // Collect remaining valid HTMLSelectAttributes
+  placeholder,
+  ...nativeSelectProps
 }) => {
-  const baseSelectClasses = "mt-1 block w-full pl-3 pr-10 py-2 text-base bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm rounded-md text-slate-900 dark:text-slate-100";
-  const errorSelectClasses = "border-red-500 focus:ring-red-500 focus:border-red-500";
+  const baseSelectClasses = `
+    mt-1 block w-full px-4 py-3 bg-white 
+    neo-border neo-shadow-sm font-bold text-neo-black
+    focus:bg-neo-secondary focus:neo-shadow-md focus:outline-none focus:ring-0
+    transition-all duration-100 cursor-pointer appearance-none
+    bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22square%22%20stroke-linejoin%3D%22miter%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')]
+    bg-[length:20px_20px] bg-[right_1rem_center] bg-no-repeat
+  `;
+  const errorSelectClasses = "bg-neo-accent/10 border-red-500 shadow-red-500/20";
   
   return (
-    <div className={`mb-4 ${wrapperClassName}`}>
+    <div className={`mb-6 ${wrapperClassName}`}>
       {label && (
-        <label htmlFor={id} className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+        <label htmlFor={id} className="block text-sm font-black uppercase tracking-widest text-neo-black mb-1">
           {label}
         </label>
       )}
       <select
         id={id}
         className={`${baseSelectClasses} ${error ? errorSelectClasses : ''} ${className}`}
-        {...nativeSelectProps} // Spread only native attributes
+        {...nativeSelectProps}
       >
-        {/* Use the destructured placeholder for the conditional default option */}
         {placeholder && <option value="" disabled>{placeholder}</option>}
         {options.map(option => (
-          <option key={option.value} value={option.value}>
+          <option key={option.value} value={option.value} className="font-bold">
             {option.label}
           </option>
         ))}
       </select>
-      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+      {error && (
+        <div className="mt-2 bg-neo-accent text-white px-3 py-1 neo-border-sm text-xs font-black uppercase tracking-widest inline-block">
+          {error}
+        </div>
+      )}
     </div>
   );
 };

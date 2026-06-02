@@ -1,9 +1,8 @@
-
 import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning' | 'ghost';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   isLoading?: boolean;
   icon?: React.ReactNode;
 }
@@ -17,23 +16,25 @@ const Button: React.FC<ButtonProps> = ({
   className = '',
   ...props
 }) => {
-  const baseStyles = 'font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-opacity-50 transition-colors duration-150 flex items-center justify-center';
+  const baseStyles = 'font-black uppercase tracking-wider neo-border transition-all duration-100 flex items-center justify-center relative active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
 
   const variantStyles = {
-    primary: 'bg-primary-500 hover:bg-primary-600 text-white focus:ring-primary-500',
-    secondary: 'bg-slate-200 hover:bg-slate-300 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 focus:ring-slate-500',
-    danger: 'bg-red-500 hover:bg-red-600 text-white focus:ring-red-500',
-    success: 'bg-green-500 hover:bg-green-600 text-white focus:ring-green-500',
-    warning: 'bg-yellow-500 hover:bg-yellow-600 text-white focus:ring-yellow-500',
+    primary: 'bg-neo-accent text-white neo-shadow-sm hover:neo-shadow-md',
+    secondary: 'bg-neo-secondary text-neo-black neo-shadow-sm hover:neo-shadow-md',
+    danger: 'bg-red-500 text-white neo-shadow-sm hover:neo-shadow-md',
+    success: 'bg-green-500 text-white neo-shadow-sm hover:neo-shadow-md',
+    warning: 'bg-neo-secondary text-neo-black neo-shadow-sm hover:neo-shadow-md',
+    ghost: 'bg-transparent border-transparent hover:neo-border hover:bg-white hover:neo-shadow-sm',
   };
 
   const sizeStyles = {
-    sm: 'px-3 py-1.5 text-xs',
-    md: 'px-4 py-2 text-sm',
-    lg: 'px-6 py-3 text-base',
+    sm: 'px-4 py-2 text-xs',
+    md: 'px-6 py-3 text-sm',
+    lg: 'px-8 py-4 text-base',
+    xl: 'px-10 py-5 text-xl',
   };
 
-  const disabledStyles = 'opacity-50 cursor-not-allowed';
+  const disabledStyles = 'opacity-50 cursor-not-allowed grayscale';
 
   return (
     <button
@@ -42,15 +43,11 @@ const Button: React.FC<ButtonProps> = ({
       {...props}
     >
       {isLoading ? (
-        <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-      ) : icon ? <span className="mr-2">{icon}</span> : null}
+        <div className="mr-3 animate-spin w-5 h-5 border-4 border-white border-t-transparent"></div>
+      ) : icon ? <span className="mr-3 text-lg">{icon}</span> : null}
       {children}
     </button>
   );
 };
 
 export default Button;
-    

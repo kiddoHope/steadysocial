@@ -80,6 +80,9 @@ export interface WIPState {
   platformContext: SocialPlatform;
   tone: CaptionTone;
   numberOfIdeas: number;
+  folderPath: string | null;
+  numberOfGenerations: number;
+  imageMode: 'generate' | 'upload';
   overallImagePreview: string | null; 
   overallImageFile: File | null; // Transient, not "stored" in DB
   overallTextFileContent: string | null;
@@ -132,16 +135,40 @@ export interface InitialIdea {
 }
 
 export interface FacebookSettings {
-  sdkUrl: string; 
   appId: string;  
   pageId: string; 
-  messagingAppId?: string;
+  accessToken?: string;
+  aiAgentContext?: string;
+  aiEnabledConversations?: string[];
+  webhookVerifyToken?: string;
 }
 
 export interface FacebookPage {
   id: string;
   name: string;
   access_token?: string; 
+}
+
+export enum AIProvider {
+  LOCAL = 'local',
+  GEMINI = 'gemini',
+  OPENAI = 'openai',
+}
+
+export interface LocalLLMSettings {
+  endpoint: string;
+  model: string;
+}
+
+export interface CloudLLMSettings {
+  apiKey: string;
+  model: string;
+}
+
+export interface AISettings {
+  provider: AIProvider;
+  local: LocalLLMSettings;
+  cloud: CloudLLMSettings;
 }
 
 export type Theme = 'light' | 'dark';
@@ -214,6 +241,7 @@ export interface FacebookConversation {
 export interface FBPageInfo {
   name?: string;
   fan_count?: number;
+  followers_count?: number;
   picture?: { data: { url: string } };
 }
 

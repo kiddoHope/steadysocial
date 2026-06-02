@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth, UserRole } from '../../contexts/AuthContext';
+import { dbAddUser } from '../../services/userService';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
@@ -11,7 +12,8 @@ interface SignupModalProps {
 }
 
 const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose }) => {
-  const { addUser, loading } = useAuth();
+  const { currentUser } = useAuth(); // No longer provides addUser or loading
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -40,17 +42,20 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose }) => {
         return;
     }
 
+    setIsLoading(true);
     try {
-      await addUser({
+      await dbAddUser({
         username: formData.username,
         email: formData.email,
-        password_param: formData.password,
+        password: formData.password, // User type uses 'password'
         role: formData.role,
-      });
+      } as any); // Type cast if needed depending on exact User definition vs backend expectation
       setNotification({ type: 'success', message: 'Account created! Please check your email to verify your account before logging in.' });
       setSignupSuccess(true);
     } catch (err: any) {
       setNotification({ type: 'error', message: err.message || 'Failed to create account. The username or email might already be in use.' });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -58,7 +63,7 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <div
-      className="fixed inset-0 bg-slate-900 bg-opacity-25 flex items-center justify-center z-50 p-4 animate-fadeIn"
+      className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fadeIn"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -89,7 +94,7 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose }) => {
               value={formData.username}
               onChange={handleChange}
               required
-              disabled={loading}
+              disabled={isLoading}
               autoFocus
             />
             <Input
@@ -100,7 +105,7 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose }) => {
               value={formData.email}
               onChange={handleChange}
               required
-              disabled={loading}
+              disabled={isLoading}
             />
             <Input
               label="Password"
@@ -110,7 +115,7 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose }) => {
               value={formData.password}
               onChange={handleChange}
               required
-              disabled={loading}
+              disabled={isLoading}
               placeholder="Minimum 8 characters"
             />
             <Input
@@ -121,13 +126,13 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose }) => {
               value={formData.confirmPassword}
               onChange={handleChange}
               required
-              disabled={loading}
+              disabled={isLoading}
             />
             <div className="flex justify-end space-x-3 pt-2">
-              <Button type="button" onClick={onClose} variant="secondary" disabled={loading}>
+              <Button type="button" onClick={onClose} variant="secondary" disabled={isLoading}>
                 Cancel
               </Button>
-              <Button type="submit" variant="primary" isLoading={loading} disabled={loading}>
+              <Button type="submit" variant="primary" isLoading={isLoading} disabled={isLoading}>
                 Sign Up
               </Button>
             </div>

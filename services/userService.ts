@@ -3,7 +3,7 @@ import { ResetPasswordPayload, VerifyResetCodePayload, VerifyCodePayload} from '
 import { signPayload } from '../utils/hashPayload';
 
 // --- Configuration ---
-const API_BASE_URL = process.env.VITE_API_KEY; 
+const API_BASE_URL = "http://localhost:3001"; 
 
 // --- Helper for API Requests ---
 const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
@@ -105,7 +105,7 @@ export const dbInvalidateToken = async (token: string): Promise<void> => {
 };
 
 
-export const dbAddUser = async (userData: Omit<User, 'id'>): Promise<UserWithoutPassword> => {
+export const dbAddUser = async (userData: Omit<User, 'id' | 'userId'>): Promise<UserWithoutPassword> => {
     return apiRequest<UserWithoutPassword>('/users', {
         method: 'POST',
         body: JSON.stringify(userData),
@@ -139,7 +139,7 @@ export const dbUpdateUserPassword = async (userId: string, newPassword_param: st
 };
 
 export const dbForgotPassword = async (email: string): Promise<{ success: boolean; message: string }> => {
-    const FORGOT_PASSWORD_URL = 'https://steadysocial.dropletsofnature.com/forgotpassword.php';
+    const FORGOT_PASSWORD_URL = 'http://localhost:3001/users/forgot-password';
     try {
         const response = await fetch(FORGOT_PASSWORD_URL, {
             method: 'POST',

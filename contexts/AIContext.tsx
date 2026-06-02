@@ -19,13 +19,19 @@ interface AIContextType {
   suggestAIPrompt: string | null;
   generateInitialCanvasItems: (props: any) => Promise<string[]>;
   adaptCanvasItem: (props: any) => Promise<string>;
-  suggestPromptForCanvasTitle: (title: string) => Promise<string>;
+  suggestPromptForCanvasTitle: (title: string, textFileContent?: string | null, imageDataUrl?: string | null) => Promise<string>;
+  generateComfyUIPrompt: (props: any) => Promise<string>;
+  generateCaptionsForImages: (props: any) => Promise<string[]>;
   setError: (error: string | null) => void;
   generateChatResponse: (props: {
     userMessage: string;
     history: Array<{ role: 'user' | 'assistant'; content: string }>;
     onChunk: (chunk: string) => void;
   }) => Promise<string>;
+  callAI: (messages: any[], stream?: boolean, onChunk?: (chunk: string) => void) => Promise<string>;
+  llmSettings: any;
+  availableModels: string[];
+  setLlmSettings: (settings: any) => void;
 }
 
 const AIContext = createContext<AIContextType | undefined>(undefined);

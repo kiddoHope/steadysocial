@@ -1,45 +1,172 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Input from '../components/ui/Input';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
-import { FacebookIcon } from '../components/icons/FacebookIcon';
-import { ChartBarIcon } from '../components/icons/ChartBarIcon';
-import { InformationCircleIcon } from '../components/icons/InformationCircleIcon';
 import { FacebookPage, FacebookSettings } from '../types';
 import Button from '../components/ui/Button';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { dbGetFacebookSettings, dbSaveFacebookSettings } from '../services/settingsService'; // Use direct DB calls
+import {
+  dbGetFacebookSettings,
+  dbSaveFacebookSettings,
+  dbSaveAISettings,
+} from '../services/settingsService';
 import useFacebookSDK from '../hooks/useFacebookSDK';
 import Alert from '../components/ui/Alert';
+import Card from '../components/ui/Card';
 import Select from '../components/ui/Select';
+import { useAI } from '../contexts/AIContext';
+import { AIProvider } from '../types';
+
+type McpClientType = 'claude-desktop' | 'codex' | 'pi-coding-agent' | 'generic';
+
+type BackendRouteStatus = 'unknown' | 'online' | 'offline';
+
+interface McpConfigState {
+  mcpServerPath: string;
+  apiUrl: string;
+  selectedClient: McpClientType;
+}
+
+const MCP_CONFIG_STORAGE_KEY = 'steadysocial_mcp_agent_config';
+
+const DEFAULT_MCP_CONFIG: McpConfigState = {
+  mcpServerPath: 'C:/vs code/steadysocial/steadysocial-mcp-server/dist/index.js',
+  apiUrl: 'http://localhost:3001',
+  selectedClient: 'pi-coding-agent',
+};
+
+const getSavedMcpConfig = (): McpConfigState => {
+  try {
+    const saved = localStorage.getItem(MCP_CONFIG_STORAGE_KEY);
+    if (!saved) return DEFAULT_MCP_CONFIG;
+
+    return {
+      ...DEFAULT_MCP_CONFIG,
+      ...JSON.parse(saved),
+    };
+  } catch (error) {
+    console.error('Failed to load MCP settings:', error);
+    return DEFAULT_MCP_CONFIG;
+  }
+};
+
+const buildClaudeConfig = (config: McpConfigState) => {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        steadysocial: {
+          command: 'node',
+          args: [config.mcpServerPath],
+          env: {
+            STEADYSOCIAL_API_URL: config.apiUrl,
+          },
+        },
+      },
+    },
+    null,
+    2
+  );
+};
+
+const buildPiConfig = (config: McpConfigState) => {
+  return JSON.stringify(
+    {
+      settings: {
+        toolPrefix: 'mcp',
+        idleTimeout: 10,
+      },
+      mcpServers: {
+        steadysocial: {
+          command: 'node',
+          args: [config.mcpServerPath],
+          env: {
+            STEADYSOCIAL_API_URL: config.apiUrl,
+          },
+          lifecycle: 'lazy',
+        },
+      },
+    },
+    null,
+    2
+  );
+};
+
+const buildCodexConfig = (config: McpConfigState) => {
+  return [
+    '[mcp_servers.steadysocial]',
+    'command = "node"',
+    `args = ["${config.mcpServerPath}"]`,
+    `env = { STEADYSOCIAL_API_URL = "${config.apiUrl}" }`,
+  ].join('\n');
+};
+
+const getMcpConfigText = (config: McpConfigState) => {
+  switch (config.selectedClient) {
+    case 'claude-desktop':
+      return buildClaudeConfig(config);
+    case 'codex':
+      return buildCodexConfig(config);
+    case 'pi-coding-agent':
+      return buildPiConfig(config);
+    default:
+      return buildClaudeConfig(config);
+  }
+};
+
+const getMcpConfigLocation = (client: McpClientType) => {
+  switch (client) {
+    case 'claude-desktop':
+      return 'Claude Desktop config file. Add or merge this under mcpServers.';
+    case 'codex':
+      return 'Codex config.toml. Add this block to your Codex MCP servers config.';
+    case 'pi-coding-agent':
+      return 'C:/Users/YOUR_USERNAME/.pi/agent/mcp.json';
+    default:
+      return 'Any MCP-compatible client that supports local stdio servers.';
+  }
+};
 
 export const SettingsPage: React.FC = () => {
-  const { logout: appLogout, currentUser, updateUserProfile } = useAuth();
+  const { currentUser, updateUserProfile } = useAuth();
   const navigate = useNavigate();
+  const {
+    llmSettings,
+    setLlmSettings,
+    creativeModelLoaded,
+    availableModels,
+    generateChatResponse,
+  } = useAI();
 
   const [initialFbSettings, setInitialFbSettings] = useState<FacebookSettings | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
 
   const [inputFbAppId, setInputFbAppId] = useState('');
+  const [inputFbAccessToken, setInputFbAccessToken] = useState('');
+  const [inputFbPageId, setInputFbPageId] = useState('');
   const [configuredFbAppId, setConfiguredFbAppId] = useState<string | null>(null);
   const [mainAppLoginStatus, setMainAppLoginStatus] = useState<'unknown' | 'connected' | 'not_authorized'>('unknown');
-  const [mainAppUserID, setMainAppUserID] = useState<string | null>(null);
-  const [fbPages, setFbPages] = useState<FacebookPage[]>([]);
-  const [selectedFbPageId, setSelectedFbPageId] = useState<string>('');
-  const [isFetchingAnalytics, setIsFetchingAnalytics] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
-  const [pageAnalytics, setPageAnalytics] = useState<Record<string, any> | null>(null);
+  const [connectedPageName, setConnectedPageName] = useState<string | null>(null);
+  const [aiAgentContext, setAiAgentContext] = useState('');
+  const [testInquiry, setTestInquiry] = useState('');
+  const [testResponse, setTestResponse] = useState('');
+  const [isTestingContext, setIsTestingContext] = useState(false);
 
-  const [inputFbMessagingAppId, setInputFbMessagingAppId] = useState('');
-  const [configuredFbMessagingAppId, setConfiguredFbMessagingAppId] = useState<string | null>(null);
-  const [messagingAppLoginStatus, setMessagingAppLoginStatus] = useState<'unknown' | 'connected' | 'not_authorized'>('unknown');
-  const [messagingAppUserID, setMessagingAppUserID] = useState<string | null>(null);
-  
   const [sdkTargetAppId, setSdkTargetAppId] = useState<string | undefined>(undefined);
-  const [loginAttemptTarget, setLoginAttemptTarget] = useState<'main' | 'messaging' | null>(null);
-  const [isFbProcessing, setIsFbProcessing] = useState(false); // General FB op loading
-  const [isSavingConfig, setIsSavingConfig] = useState(false); // Specific for save button
-  const [fbActionMessage, setFbActionMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [isFbProcessing, setIsFbProcessing] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [fbActionMessage, setFbActionMessage] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+  const [isSavingAIConfig, setIsSavingAIConfig] = useState(false);
+
+  const [mcpConfig, setMcpConfig] = useState<McpConfigState>(() => getSavedMcpConfig());
+  const [backendRouteStatus, setBackendRouteStatus] = useState<BackendRouteStatus>('unknown');
+  const [isTestingMcpBackend, setIsTestingMcpBackend] = useState(false);
+  const [mcpTestDetails, setMcpTestDetails] = useState('');
+  const [mcpCopied, setMcpCopied] = useState(false);
+
+  const generatedMcpConfig = useMemo(() => getMcpConfigText(mcpConfig), [mcpConfig]);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -48,412 +175,649 @@ export const SettingsPage: React.FC = () => {
         const settings = await dbGetFacebookSettings();
         setInitialFbSettings(settings);
         setInputFbAppId(settings.appId || '');
+        setInputFbAccessToken(settings.accessToken || '');
+        setInputFbPageId(settings.pageId || '');
         setConfiguredFbAppId(settings.appId || null);
-        setInputFbMessagingAppId(settings.messagingAppId || '');
-        setConfiguredFbMessagingAppId(settings.messagingAppId || null);
-        setSelectedFbPageId(settings.pageId || ''); // Load selected page ID
         setSdkTargetAppId(settings.appId || undefined);
+        setAiAgentContext(settings.aiAgentContext || '');
       } catch (err) {
-        console.error("Failed to load settings:", err);
+        console.error('Failed to load settings:', err);
         setFbActionMessage({ type: 'error', text: 'Could not load Facebook settings.' });
       } finally {
         setIsLoadingSettings(false);
       }
     };
+
     loadSettings();
   }, []);
 
-  const { 
-    isSdkLoaded, 
-    isSdkInitialized, 
-    fbApi, 
-    error: sdkError, 
-    FB: fbInstance 
-  } = useFacebookSDK(sdkTargetAppId, initialFbSettings?.sdkUrl);
+  const { fbApi, error: sdkError } = useFacebookSDK(
+    sdkTargetAppId,
+    undefined,
+    initialFbSettings?.accessToken
+  );
 
+  const updateMcpConfig = useCallback((updates: Partial<McpConfigState>) => {
+    setMcpConfig(prev => ({ ...prev, ...updates }));
+    setMcpCopied(false);
+  }, []);
+
+  const handleSaveMcpConfig = useCallback(() => {
+    localStorage.setItem(MCP_CONFIG_STORAGE_KEY, JSON.stringify(mcpConfig));
+    setFbActionMessage({
+      type: 'success',
+      text: 'MCP agent connection settings saved locally.',
+    });
+  }, [mcpConfig]);
+
+  const handleCopyMcpConfig = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(generatedMcpConfig);
+      setMcpCopied(true);
+      setFbActionMessage({
+        type: 'success',
+        text: 'MCP config copied to clipboard.',
+      });
+    } catch (error) {
+      console.error('Failed to copy MCP config:', error);
+      setFbActionMessage({
+        type: 'error',
+        text: 'Could not copy MCP config. Select and copy it manually.',
+      });
+    }
+  }, [generatedMcpConfig]);
+
+  const handleTestMcpBackend = useCallback(async () => {
+    setIsTestingMcpBackend(true);
+    setBackendRouteStatus('unknown');
+    setMcpTestDetails('');
+
+    try {
+      const routeChecks = await Promise.all(
+        ['/campaigns', '/canvases', '/automations'].map(async route => {
+          const response = await fetch(`${mcpConfig.apiUrl}${route}`, {
+            headers: {
+              Accept: 'application/json',
+            },
+          });
+
+          return {
+            route,
+            ok: response.ok,
+            status: response.status,
+          };
+        })
+      );
+
+      const failedRoutes = routeChecks.filter(item => !item.ok);
+
+      if (failedRoutes.length > 0) {
+        setBackendRouteStatus('offline');
+        setMcpTestDetails(
+          failedRoutes
+            .map(item => `${item.route}: HTTP ${item.status}`)
+            .join('\n')
+        );
+        setFbActionMessage({
+          type: 'error',
+          text: 'Some MCP backend routes are not available.',
+        });
+        return;
+      }
+
+      setBackendRouteStatus('online');
+      setMcpTestDetails(
+        routeChecks.map(item => `${item.route}: OK`).join('\n')
+      );
+      setFbActionMessage({
+        type: 'success',
+        text: 'SteadySocial backend is ready for MCP clients.',
+      });
+    } catch (error: any) {
+      console.error('MCP backend test failed:', error);
+      setBackendRouteStatus('offline');
+      setMcpTestDetails(error?.message || 'Connection test failed.');
+      setFbActionMessage({
+        type: 'error',
+        text: 'Could not reach the SteadySocial backend for MCP.',
+      });
+    } finally {
+      setIsTestingMcpBackend(false);
+    }
+  }, [mcpConfig.apiUrl]);
 
   const handleSaveFacebookConfig = useCallback(async () => {
-    if (!inputFbAppId.trim() && !inputFbMessagingAppId.trim()) {
-      setFbActionMessage({ type: 'error', text: 'At least one Facebook App ID must be provided.' });
+    if (!inputFbAppId.trim()) {
+      setFbActionMessage({ type: 'error', text: 'Facebook App ID must be provided.' });
       return;
     }
-    setIsSavingConfig(true); // Specific loader for save
+
+    setIsSavingConfig(true);
     setFbActionMessage(null);
+
     try {
-      const newSettingsData: Partial<FacebookSettings> = { 
+      const newSettingsData: Partial<FacebookSettings> = {
         appId: inputFbAppId.trim(),
-        messagingAppId: inputFbMessagingAppId.trim(),
-        pageId: selectedFbPageId // Persist selected page ID
+        accessToken: inputFbAccessToken.trim(),
+        pageId: inputFbPageId.trim(),
+        aiAgentContext,
       };
+
       const savedSettings = await dbSaveFacebookSettings(newSettingsData);
-      
-      setInitialFbSettings(savedSettings); // Update local state with latest saved settings
+
+      setInitialFbSettings(savedSettings);
       setConfiguredFbAppId(savedSettings.appId || null);
-      setConfiguredFbMessagingAppId(savedSettings.messagingAppId || null);
-      
-      // Logic for SDK re-targeting if necessary
-      if (sdkTargetAppId === configuredFbAppId && !savedSettings.appId && savedSettings.messagingAppId) {
-        setSdkTargetAppId(savedSettings.messagingAppId);
-      } else if (sdkTargetAppId === configuredFbMessagingAppId && !savedSettings.messagingAppId && savedSettings.appId) {
+
+      if (!sdkTargetAppId && savedSettings.appId) {
         setSdkTargetAppId(savedSettings.appId);
-      } else if (!sdkTargetAppId && savedSettings.appId) {
-        setSdkTargetAppId(savedSettings.appId);
-      } else if (!sdkTargetAppId && savedSettings.messagingAppId) {
-        setSdkTargetAppId(savedSettings.messagingAppId);
       }
-      
-      setFbActionMessage({ type: 'success', text: 'Facebook configuration saved. SDK will re-initialize if active App ID changed.' });
+
+      setFbActionMessage({ type: 'success', text: 'Settings saved successfully.' });
     } catch (e) {
-      console.error("Failed to save Facebook configuration:", e);
-      setFbActionMessage({ type: 'error', text: 'Failed to save Facebook configuration.' });
+      console.error('Failed to save settings:', e);
+      setFbActionMessage({ type: 'error', text: 'Failed to save settings.' });
     } finally {
       setIsSavingConfig(false);
     }
-  }, [inputFbAppId, inputFbMessagingAppId, sdkTargetAppId, configuredFbAppId, configuredFbMessagingAppId, selectedFbPageId]);
+  }, [
+    inputFbAppId,
+    inputFbAccessToken,
+    inputFbPageId,
+    aiAgentContext,
+    sdkTargetAppId,
+    configuredFbAppId,
+  ]);
 
-  const FB_PERMISSIONS_SCOPE = 'email,public_profile,pages_show_list,read_insights,pages_read_engagement,pages_manage_posts,pages_manage_engagement,pages_read_user_content,pages_messaging';
+  const handleSaveAIConfig = useCallback(async () => {
+    setIsSavingAIConfig(true);
+    setFbActionMessage(null);
 
-  const fetchPagesForMainApp = useCallback(async () => {
-    if (!fbApi) {
-      setFbActionMessage({ type: 'error', text: "Cannot fetch pages: Facebook API not available." });
-      return;
-    }
-    setIsFbProcessing(true);
-    setFbActionMessage({ type: 'info', text: "Fetching Facebook pages for Main App..." });
     try {
-      const pagesResponse = await fbApi<{data: FacebookPage[]}>('/me/accounts?fields=id,name,access_token');
-      setFbPages(pagesResponse.data || []);
-      if (pagesResponse.data && pagesResponse.data.length > 0) {
-        // If a page was already selected and is in the new list, keep it. Otherwise, default or clear.
-        const currentSelectedStillExists = pagesResponse.data.some(p => p.id === selectedFbPageId);
-        if (!currentSelectedStillExists && pagesResponse.data.length > 0) {
-            setSelectedFbPageId(pagesResponse.data[0].id); // Default to first page
-        } else if (!currentSelectedStillExists) {
-            setSelectedFbPageId(''); // No pages, or previously selected one is gone
-        }
-        setFbActionMessage({ type: 'success', text: 'Main App connected. Facebook pages loaded.' });
-      } else {
-        setSelectedFbPageId('');
-        setFbActionMessage({ type: 'info', text: 'MainApp connected, but no Facebook pages found or permission not granted.' });
-      }
-    } catch (err: any) {
-      console.error("Error fetching pages for Main App:", err);
-      setFbActionMessage({ type: 'error', text: `Main App connected, but failed to fetch pages: ${err.message}` });
+      await dbSaveAISettings(llmSettings);
+      setFbActionMessage({ type: 'success', text: 'AI configuration saved to backend.' });
+    } catch (e) {
+      console.error('Failed to save AI settings:', e);
+      setFbActionMessage({ type: 'error', text: 'Failed to save AI settings to backend.' });
     } finally {
-      setIsFbProcessing(false);
+      setIsSavingAIConfig(false);
     }
-  }, [fbApi, selectedFbPageId]); // Added selectedFbPageId
+  }, [llmSettings]);
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  useEffect(() => {
-    if (isSdkInitialized && fbInstance && loginAttemptTarget) {
-      setIsFbProcessing(true);
-      const target = loginAttemptTarget; 
-      
-      setFbActionMessage({type: 'info', text: `Checking login status for ${target === 'main' ? 'Main' : 'Messenger'} App...`});
+    const reader = new FileReader();
+    reader.onload = event => {
+      const content = event.target?.result as string;
+      setAiAgentContext(content);
+    };
+    reader.readAsText(file);
+  };
 
-      fbInstance.getLoginStatus((response: any) => {
-        if (response.status === 'connected') {
-          if (target === 'main') {
-            setMainAppLoginStatus('connected');
-            setMainAppUserID(response.authResponse.userID);
-            fetchPagesForMainApp(); 
-          } else { 
-            setMessagingAppLoginStatus('connected');
-            setMessagingAppUserID(response.authResponse.userID);
-          }
-          setFbActionMessage({type: 'success', text: `Already connected with ${target} App.`});
-          setIsFbProcessing(false);
-          setLoginAttemptTarget(null);
-        } else { 
-          setFbActionMessage({type: 'info', text: `Attempting login with ${target} App...`});
-          fbInstance.login((loginResponse: any) => {
-            if (loginResponse.authResponse) {
-              if (target === 'main') {
-                setMainAppLoginStatus('connected');
-                setMainAppUserID(loginResponse.authResponse.userID);
-                fetchPagesForMainApp();
-              } else { 
-                setMessagingAppLoginStatus('connected');
-                setMessagingAppUserID(loginResponse.authResponse.userID);
-                setFbActionMessage({type: 'success', text: `Successfully connected with Messenger App.`});
-              }
-            } else {
-              if (target === 'main') setMainAppLoginStatus('not_authorized');
-              else setMessagingAppLoginStatus('not_authorized');
-              setFbActionMessage({type: 'error', text: `${target} App login failed or was cancelled.`});
-            }
-            setIsFbProcessing(false);
-            setLoginAttemptTarget(null);
-          }, { scope: FB_PERMISSIONS_SCOPE });
-        }
+  const handleTestContext = async () => {
+    if (!testInquiry.trim() || !aiAgentContext) return;
+
+    setIsTestingContext(true);
+    setTestResponse('');
+
+    try {
+      const prompt = `
+CONTEXT_KNOWLEDGE_BASE:
+${aiAgentContext}
+
+CUSTOMER_INQUIRY:
+${testInquiry}
+
+INSTRUCTIONS:
+Answer the customer's inquiry based ONLY on the provided context.
+Keep it professional, friendly, and concise.
+Respond only with the message text.
+      `;
+
+      const response = await generateChatResponse({
+        userMessage: prompt,
+        history: [],
+        onChunk: chunk => setTestResponse(prev => prev + chunk),
       });
-    }
-  }, [isSdkInitialized, fbInstance, loginAttemptTarget, fetchPagesForMainApp]);
-  
 
-  const handleConnect = (target: 'main' | 'messaging') => {
-    const targetAppIdToConnect = target === 'main' ? configuredFbAppId : configuredFbMessagingAppId;
-    if (!targetAppIdToConnect) {
-      setFbActionMessage({ type: 'error', text: `${target === 'main' ? 'Main' : 'Messaging'} App ID is not configured.` });
-      return;
+      if (response) setTestResponse(response);
+    } catch (err) {
+      setTestResponse('Error testing context: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsTestingContext(false);
     }
-    setSdkTargetAppId(targetAppIdToConnect); 
-    setLoginAttemptTarget(target); 
   };
 
-  const handleDisconnect = (target: 'main' | 'messaging') => {
-    if (!fbInstance || !isSdkInitialized) {
-      setFbActionMessage({type: 'error', text: "Facebook SDK not ready for logout."});
+  const handleConnect = useCallback(async () => {
+    const token = initialFbSettings?.accessToken;
+    const pageId = initialFbSettings?.pageId;
+
+    if (!token) {
+      setFbActionMessage({ type: 'error', text: 'Access token is required.' });
       return;
     }
-    
-    const targetAppIdToDisconnect = target === 'main' ? configuredFbAppId : configuredFbMessagingAppId;
-    if (sdkTargetAppId !== targetAppIdToDisconnect && targetAppIdToDisconnect) {
-        setSdkTargetAppId(targetAppIdToDisconnect);
-        // Defer logout until SDK re-initializes. This is tricky.
-        // For simplicity, assume logout works on current FB session or that user has to click again after SDK switches.
-        // A better UX might involve a small delay or a two-step process if SDK switch is needed.
-        setFbActionMessage({type: 'info', text: `Switching SDK context to ${target} App for disconnect. Please click disconnect again if it doesn't proceed.`});
-        return; 
-    }
 
+    if (!pageId) {
+      setFbActionMessage({ type: 'error', text: 'Page ID is required.' });
+      return;
+    }
 
     setIsFbProcessing(true);
-    setFbActionMessage({type: 'info', text: `Disconnecting from ${target} App...`});
-    fbInstance.logout(() => {
-      if (target === 'main') {
-        setMainAppLoginStatus('unknown');
-        setMainAppUserID(null);
-        setFbPages([]);
-        setSelectedFbPageId('');
-        setPageAnalytics(null);
-        setAnalyticsError(null);
-      } else { 
-        setMessagingAppLoginStatus('unknown');
-        setMessagingAppUserID(null);
-      }
-      setFbActionMessage({type: 'success', text: `Successfully disconnected from ${target} App.`});
-      setIsFbProcessing(false);
-    });
-  };
-
-  const handleFetchPageAnalytics = useCallback(async () => {
-    if (!selectedFbPageId || !fbApi || mainAppLoginStatus !== 'connected') {
-        setAnalyticsError("Main App not connected or no page selected for analytics.");
-        return;
-    }
-    if (sdkTargetAppId !== configuredFbAppId) {
-        setAnalyticsError("SDK not targeting Main App. Connect with Main App to fetch analytics.");
-        return;
-    }
-
-    setIsFetchingAnalytics(true);
-    setAnalyticsError(null);
-    setPageAnalytics(null);
-
-    const selectedPageObject = fbPages.find(p => p.id === selectedFbPageId);
-    if (!selectedPageObject?.access_token) {
-        setAnalyticsError("Page Access Token not found. Try reconnecting Main App or re-selecting page.");
-        setIsFetchingAnalytics(false);
-        return;
-    }
-    const pageAccessToken = selectedPageObject.access_token;
+    setFbActionMessage(null);
 
     try {
-        const response = await fbApi<any>(`/${selectedFbPageId}/insights?metric=page_impressions_unique&period=day&date_preset=last_28_days&access_token=${pageAccessToken}`);
-        const impressions = response?.data?.[0]?.values?.reduce((sum: number, val: {value: number}) => sum + val.value, 0) ?? 'N/A';
-        setPageAnalytics({ impressions });
-        setFbActionMessage({ type: 'success', text: 'Analytics fetched for selected page.' });
+      const pageInfo = await fbApi<{ id: string; name: string }>(`/${pageId}?fields=id,name`);
+      setMainAppLoginStatus('connected');
+      setConnectedPageName(pageInfo.name || pageId);
+      setFbActionMessage({ type: 'success', text: `Connected to page: ${pageInfo.name}` });
     } catch (err: any) {
-        setAnalyticsError(err.message || "Failed to fetch analytics.");
+      console.error('Connection test failed:', err);
+      setMainAppLoginStatus('not_authorized');
+      setFbActionMessage({ type: 'error', text: `Connection failed: ${err.message}` });
     } finally {
-        setIsFetchingAnalytics(false);
+      setIsFbProcessing(false);
     }
-  }, [selectedFbPageId, fbApi, mainAppLoginStatus, fbPages, sdkTargetAppId, configuredFbAppId]);
+  }, [fbApi, initialFbSettings?.accessToken, initialFbSettings?.pageId]);
 
-  const handleAppLogout = () => {
-    appLogout();
-    navigate('/login');
+  const handleDisconnect = () => {
+    setMainAppLoginStatus('unknown');
+    setConnectedPageName(null);
   };
-  
-  const currentSdkTargetIsMain = sdkTargetAppId === configuredFbAppId && configuredFbAppId;
-  const currentSdkTargetIsMessaging = sdkTargetAppId === configuredFbMessagingAppId && configuredFbMessagingAppId;
 
   if (isLoadingSettings) {
     return (
-        <div className="flex items-center justify-center h-screen">
-            <LoadingSpinner size="lg" />
-            <p className="ml-3">Loading settings...</p>
-        </div>
+      <div className="flex items-center justify-center h-screen bg-neo-bg">
+        <LoadingSpinner size="lg" />
+      </div>
     );
   }
 
   return (
-    <div className="animate-fadeIn">
-      <header className="mb-6 md:mb-8">
-        <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Settings</h1>
-        <p className="text-slate-600 dark:text-slate-400 mt-1">
-          Configure Facebook integration and manage your application session.
-        </p>
-      </header>
-      
-      {sdkError && (!loginAttemptTarget) && <Alert type="error" message={`SDK Error: ${sdkError}`} className="mb-4" />}
-      {fbActionMessage && (
-          <Alert type={fbActionMessage.type} message={fbActionMessage.text} onClose={() => setFbActionMessage(null)} className="mb-4"/>
-      )}
+    <div className="min-h-full bg-neo-bg p-8 font-space relative overflow-hidden">
+      <div className="absolute inset-0 bg-halftone opacity-5 pointer-events-none"></div>
 
-      <section className="p-4 sm:p-6 bg-white dark:bg-slate-800 shadow-xl rounded-xl border border-slate-200 dark:border-slate-700 max-w-2xl mx-auto mb-6">
-        <h2 className="text-xl font-semibold text-primary-500 dark:text-primary-400 mb-3">Facebook App Configuration</h2>
-        <Input 
-            id="fbAppIdInput" 
-            label="Main Facebook App ID (for Analytics, Pages)" 
-            value={inputFbAppId} 
-            onChange={(e) => setInputFbAppId(e.target.value)} 
-            placeholder="Enter Main App ID" 
-            disabled={isSavingConfig || isFbProcessing} 
-            wrapperClassName="mb-3"
-        />
-        <Input 
-            id="fbMessagingAppIdInput" 
-            label="Facebook Messaging App ID" 
-            value={inputFbMessagingAppId} 
-            onChange={(e) => setInputFbMessagingAppId(e.target.value)} 
-            placeholder="Enter Messaging App ID (e.g., 1084...)" 
-            disabled={isSavingConfig || isFbProcessing} 
-            wrapperClassName="mb-3"
-        />
-         {mainAppLoginStatus === 'connected' && fbPages.length > 0 && (
-             <Select
-              label="Default Page for Analytics/Posting (Main App)"
-              id="fbDefaultPageSelect" 
-              value={selectedFbPageId} 
-              onChange={(e) => setSelectedFbPageId(e.target.value)}
-              disabled={isSavingConfig || isFbProcessing || !currentSdkTargetIsMain || mainAppLoginStatus !== 'connected'}
-              options={fbPages.map(page => ({ value: page.id, label: page.name }))}
-              wrapperClassName="mb-3"
-              placeholder="-- Select a Default Page --"
-            />
-        )}
-        <Button 
-            onClick={handleSaveFacebookConfig}
-            disabled={isSavingConfig || isFbProcessing || (!inputFbAppId.trim() && !inputFbMessagingAppId.trim())} 
-            variant="secondary"
-            className="w-full"
-            isLoading={isSavingConfig}
-        >
-            Save Facebook Configuration
-        </Button>
-      </section>
-
-      <section className="p-4 sm:p-6 bg-white dark:bg-slate-800 shadow-xl rounded-xl border border-slate-200 dark:border-slate-700 max-w-2xl mx-auto mb-6">
-        <h2 className="text-xl font-semibold text-primary-500 dark:text-primary-400 mb-1">Facebook Integration (Main App)</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">For Page analytics and general Facebook actions.</p>
-        
-        {!configuredFbAppId && <p className="text-sm text-orange-500 dark:text-orange-400">Main App ID not configured.</p>}
-        {configuredFbAppId && !isSdkLoaded && currentSdkTargetIsMain && <p className="text-sm text-yellow-500 dark:text-yellow-400 flex items-center"><LoadingSpinner size="sm" className="mr-2"/>SDK loading for Main App...</p>}
-        {configuredFbAppId && isSdkLoaded && !isSdkInitialized && currentSdkTargetIsMain && <p className="text-sm text-yellow-500 dark:text-yellow-400 flex items-center"><LoadingSpinner size="sm" className="mr-2"/>SDK initializing for Main App...</p>}
-
-        {configuredFbAppId && mainAppLoginStatus !== 'connected' && (
-          <Button
-            onClick={() => handleConnect('main')}
-            disabled={isFbProcessing || !configuredFbAppId || (sdkTargetAppId === configuredFbAppId && !isSdkInitialized)}
-            variant="primary"
-            className="w-full my-2 py-3"
-            icon={isFbProcessing && loginAttemptTarget === 'main' ? <LoadingSpinner size="sm" className="text-white"/> : <FacebookIcon className="w-5 h-5"/>}
-          >
-            Connect with Main App
-          </Button>
-        )}
-        {mainAppLoginStatus === 'connected' && (
-          <>
-            <p className="text-sm text-green-600 dark:text-green-400 mb-2">Connected with Main App (User ID: {mainAppUserID})</p>
-             {fbPages.length > 0 && (
-                <p className="text-sm text-slate-600 dark:text-slate-300 mb-1">Currently selected default page for actions: <span className="font-semibold">{fbPages.find(p=>p.id === selectedFbPageId)?.name || 'None Selected'}</span></p>
-            )}
-
-            {selectedFbPageId && mainAppLoginStatus === 'connected' && (
-                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-600">
-                     <h3 className="text-md font-semibold text-primary-500 dark:text-primary-400 mb-2 flex items-center"><ChartBarIcon className="w-5 h-5 mr-2"/>Page Analytics (for selected default page)</h3>
-                     <Button 
-                        onClick={handleFetchPageAnalytics}
-                        disabled={!selectedFbPageId || isFetchingAnalytics || !currentSdkTargetIsMain || isFbProcessing}
-                        variant="primary"
-                        className="w-full mb-2 opacity-80 hover:opacity-100"
-                        icon={isFetchingAnalytics ? <LoadingSpinner size="sm" className="text-white" /> : <ChartBarIcon className="w-4 h-4"/>}
-                      >
-                       {isFetchingAnalytics ? 'Fetching Analytics...' : 'Fetch Analytics'}
-                     </Button>
-                     {analyticsError && <Alert type="error" message={analyticsError} onClose={()=>setAnalyticsError(null)} className="text-xs"/>}
-                     {pageAnalytics && !isFetchingAnalytics && !analyticsError && (
-                        <div className="my-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md text-xs border border-slate-200 dark:border-slate-600">
-                           {Object.entries(pageAnalytics).map(([key, value]) => (
-                                <div key={key} className="flex justify-between">
-                                    <span className="capitalize">{key.replace(/_/g, ' ')}:</span>
-                                    <span>{typeof value === 'number' ? value.toLocaleString() : String(value)}</span>
-                                </div>
-                            ))}
-                        </div>
-                     )}
-                </div>
-            )}
-            <Button onClick={() => handleDisconnect('main')} variant="danger" className="w-full mt-2 py-3" icon={<FacebookIcon className="w-5 h-5"/>} disabled={isFbProcessing}>
-              Disconnect Main App
-            </Button>
-          </>
-        )}
-      </section>
-
-      <section className="p-4 sm:p-6 bg-white dark:bg-slate-800 shadow-xl rounded-xl border border-slate-200 dark:border-slate-700 max-w-2xl mx-auto mb-6">
-        <h2 className="text-xl font-semibold text-primary-500 dark:text-primary-400 mb-1">Messenger Integration</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">For Facebook Page chat functionalities.</p>
-
-        {!configuredFbMessagingAppId && <p className="text-sm text-orange-500 dark:text-orange-400">Messaging App ID not configured.</p>}
-        {configuredFbMessagingAppId && !isSdkLoaded && currentSdkTargetIsMessaging && <p className="text-sm text-yellow-500 dark:text-yellow-400 flex items-center"><LoadingSpinner size="sm" className="mr-2"/>SDK loading for Messaging App...</p>}
-        {configuredFbMessagingAppId && isSdkLoaded && !isSdkInitialized && currentSdkTargetIsMessaging && <p className="text-sm text-yellow-500 dark:text-yellow-400 flex items-center"><LoadingSpinner size="sm" className="mr-2"/>SDK initializing for Messaging App...</p>}
-
-        {configuredFbMessagingAppId && messagingAppLoginStatus !== 'connected' && (
-          <Button
-            onClick={() => handleConnect('messaging')}
-            disabled={isFbProcessing || !configuredFbMessagingAppId || (sdkTargetAppId === configuredFbMessagingAppId && !isSdkInitialized)}
-            variant="primary"
-            className="w-full my-2 py-3"
-            icon={isFbProcessing && loginAttemptTarget === 'messaging' ? <LoadingSpinner size="sm" className="text-white"/> : <FacebookIcon className="w-5 h-5"/>}
-          >
-            Connect with Messaging App
-          </Button>
-        )}
-        {messagingAppLoginStatus === 'connected' && (
-          <>
-            <p className="text-sm text-green-600 dark:text-green-400 mb-2">Connected with Messaging App (User ID: {messagingAppUserID})</p>
-            <Button onClick={() => handleDisconnect('messaging')} variant="danger" className="w-full mt-2 py-3" icon={<FacebookIcon className="w-5 h-5"/>} disabled={isFbProcessing}>
-              Disconnect Messaging App
-            </Button>
-          </>
-        )}
-      </section>
-      
-      <section className="p-4 sm:p-6 bg-white dark:bg-slate-800 shadow-xl rounded-xl border border-slate-200 dark:border-slate-700 max-w-2xl mx-auto">
-        <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-800/40 border border-yellow-300 dark:border-yellow-600 rounded-lg text-sm text-yellow-700 dark:text-yellow-200 flex items-start">
-            <InformationCircleIcon className="w-5 h-5 mr-2 mt-0.5 flex-shrink-0 text-yellow-500 dark:text-yellow-400" />
-            <div>
-                <strong className="font-semibold">Important Notes:</strong>
-                <ul className="list-disc list-inside mt-1">
-                    <li>Ensure "Login with JavaScript SDK" is enabled for both App IDs on <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" className="font-medium underline hover:text-yellow-800 dark:hover:text-yellow-100">developers.facebook.com</a>.</li>
-                    <li>Permissions like `pages_messaging`, `pages_read_engagement`, etc., require App Review by Facebook for live apps.</li>
-                    <li>If you change App IDs, the SDK will re-initialize. You may need to re-connect.</li>
-                     <li>Disconnecting one app context does not necessarily log you out of Facebook entirely in your browser.</li>
-                </ul>
-            </div>
+      <header className="relative z-10 mb-12 max-w-[1400px] mx-auto">
+        <div className="inline-block bg-neo-accent text-white px-2 py-0.5 mb-2 neo-border-sm rotate-1">
+          <span className="text-[10px] font-black uppercase tracking-widest">SYSTEM CONFIGURATION</span>
         </div>
-        <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-3">Account Actions</h2>
-        <Button onClick={handleAppLogout} variant="secondary" className="w-full py-3" disabled={isFbProcessing}>
-          Logout from SteadySocial
-        </Button>
-      </section>
+        <h1 className="text-5xl md:text-7xl font-black uppercase tracking-tighter text-neo-black leading-none mb-4">
+          Engine <span className="text-neo-secondary outline-text">Settings</span>
+        </h1>
+      </header>
+
+      <main className="relative z-10 max-w-[1400px] mx-auto space-y-12">
+        {fbActionMessage && (
+          <Alert
+            type={fbActionMessage.type}
+            message={fbActionMessage.text}
+            onClose={() => setFbActionMessage(null)}
+            className="-rotate-1"
+          />
+        )}
+
+        <div className="grid lg:grid-cols-2 gap-10">
+          <section className="space-y-10">
+            <Card title="FACEBOOK_IDENTITY_CONFIG" className="!p-8 neo-shadow-lg bg-white">
+              <div className="space-y-6">
+                <Input
+                  id="fbAppIdInput"
+                  label="APP_ID"
+                  value={inputFbAppId}
+                  onChange={e => setInputFbAppId(e.target.value)}
+                  disabled={isSavingConfig || isFbProcessing}
+                />
+                <Input
+                  id="fbPageIdInput"
+                  label="PAGE_ID"
+                  value={inputFbPageId}
+                  onChange={e => setInputFbPageId(e.target.value)}
+                  disabled={isSavingConfig || isFbProcessing}
+                  placeholder="Your Facebook Page ID"
+                />
+                <Input
+                  id="fbAccessTokenInput"
+                  label="PAGE_ACCESS_TOKEN"
+                  value={inputFbAccessToken}
+                  onChange={e => setInputFbAccessToken(e.target.value)}
+                  disabled={isSavingConfig || isFbProcessing}
+                  type="password"
+                />
+                <Button
+                  onClick={handleSaveFacebookConfig}
+                  disabled={isSavingConfig || isFbProcessing || !inputFbAppId.trim()}
+                  variant="primary"
+                  className="w-full !py-4"
+                  isLoading={isSavingConfig}
+                >
+                  COMMIT_CONFIGURATION
+                </Button>
+              </div>
+            </Card>
+
+            <Card title="AI_ENGINE_CONFIG" className="!p-8 neo-shadow-lg bg-white">
+              <div className="space-y-8">
+                <div className="space-y-4">
+                  <label className="block text-[10px] font-black uppercase tracking-widest mb-2">AI_PROVIDER</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[AIProvider.LOCAL, AIProvider.GEMINI, AIProvider.OPENAI].map(provider => (
+                      <button
+                        key={provider}
+                        onClick={() => setLlmSettings({ ...llmSettings, provider })}
+                        className={`py-2 px-3 neo-border-sm text-[10px] font-black uppercase tracking-widest transition-all ${
+                          llmSettings.provider === provider
+                            ? 'bg-neo-black text-white'
+                            : 'bg-neo-bg text-neo-black hover:bg-neo-muted'
+                        }`}
+                      >
+                        {provider}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {llmSettings.provider === AIProvider.LOCAL ? (
+                  <div className="space-y-6">
+                    <Input
+                      id="llmEndpointInput"
+                      label="API_ENDPOINT"
+                      value={llmSettings.local.endpoint}
+                      onChange={e =>
+                        setLlmSettings({
+                          ...llmSettings,
+                          local: { ...llmSettings.local, endpoint: e.target.value },
+                        })
+                      }
+                    />
+                    {availableModels && availableModels.length > 0 ? (
+                      <Select
+                        id="llmModelSelect"
+                        label="MODEL_IDENTIFIER"
+                        value={llmSettings.local.model}
+                        onChange={e =>
+                          setLlmSettings({
+                            ...llmSettings,
+                            local: { ...llmSettings.local, model: e.target.value },
+                          })
+                        }
+                        options={availableModels.map(model => ({ value: model, label: model }))}
+                      />
+                    ) : (
+                      <Input
+                        id="llmModelInput"
+                        label="MODEL_IDENTIFIER"
+                        value={llmSettings.local.model}
+                        onChange={e =>
+                          setLlmSettings({
+                            ...llmSettings,
+                            local: { ...llmSettings.local, model: e.target.value },
+                          })
+                        }
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <Input
+                      id="cloudApiKeyInput"
+                      label={`${llmSettings.provider.toUpperCase()}_API_KEY`}
+                      value={llmSettings.cloud.apiKey}
+                      onChange={e =>
+                        setLlmSettings({
+                          ...llmSettings,
+                          cloud: { ...llmSettings.cloud, apiKey: e.target.value },
+                        })
+                      }
+                      type="password"
+                      placeholder={`Enter your ${llmSettings.provider} API key`}
+                    />
+                    <Input
+                      id="cloudModelInput"
+                      label="MODEL_IDENTIFIER"
+                      value={llmSettings.cloud.model}
+                      onChange={e =>
+                        setLlmSettings({
+                          ...llmSettings,
+                          cloud: { ...llmSettings.cloud, model: e.target.value },
+                        })
+                      }
+                      placeholder={llmSettings.provider === AIProvider.GEMINI ? 'gemini-2.0-flash' : 'gpt-4o'}
+                    />
+                  </div>
+                )}
+
+                <div className={`p-4 neo-border-sm flex items-center justify-between ${creativeModelLoaded ? 'bg-neo-secondary' : 'bg-neo-accent text-white'}`}>
+                  <span className="text-[10px] font-black uppercase tracking-widest">ENGINE_STATUS:</span>
+                  <span className="font-black uppercase tracking-widest">{creativeModelLoaded ? 'ACTIVE' : 'OFFLINE'}</span>
+                </div>
+
+                <Button
+                  onClick={handleSaveAIConfig}
+                  variant="primary"
+                  className="w-full !py-4"
+                  isLoading={isSavingAIConfig}
+                >
+                  COMMIT_AI_CONFIGURATION
+                </Button>
+              </div>
+            </Card>
+
+            <Card title="EXTERNAL_AGENT_MCP_BRIDGE" className="!p-8 neo-shadow-lg bg-white border-neo-secondary">
+              <div className="space-y-6">
+                <div className="p-4 neo-border-sm bg-neo-muted">
+                  <h3 className="text-sm font-black uppercase tracking-widest mb-2">CONNECT CLAUDE / CODEX / PI / CURSOR</h3>
+                  <p className="text-[10px] font-bold text-neo-black/60 uppercase tracking-wider leading-relaxed">
+                    This does not connect your internal chatbot. It prepares a local MCP config so external coding agents can manage SteadySocial through your local backend.
+                  </p>
+                </div>
+
+                <Select
+                  id="mcpClientSelect"
+                  label="AGENT_CLIENT"
+                  value={mcpConfig.selectedClient}
+                  onChange={e => updateMcpConfig({ selectedClient: e.target.value as McpClientType })}
+                  options={[
+                    { value: 'pi-coding-agent', label: 'Pi Coding Agent' },
+                    { value: 'claude-desktop', label: 'Claude Desktop / Claude Code' },
+                    { value: 'codex', label: 'Codex' },
+                    { value: 'generic', label: 'Generic MCP Client' },
+                  ]}
+                />
+
+                <Input
+                  id="mcpServerPathInput"
+                  label="MCP_SERVER_DIST_PATH"
+                  value={mcpConfig.mcpServerPath}
+                  onChange={e => updateMcpConfig({ mcpServerPath: e.target.value })}
+                  placeholder="C:/vs code/steadysocial/steadysocial-mcp-server/dist/index.js"
+                />
+
+                <Input
+                  id="mcpApiUrlInput"
+                  label="STEADYSOCIAL_API_URL"
+                  value={mcpConfig.apiUrl}
+                  onChange={e => updateMcpConfig({ apiUrl: e.target.value })}
+                  placeholder="http://localhost:3001"
+                />
+
+                <div className={`p-4 neo-border-sm flex items-center justify-between ${backendRouteStatus === 'online' ? 'bg-neo-secondary' : backendRouteStatus === 'offline' ? 'bg-neo-accent text-white' : 'bg-neo-bg'}`}>
+                  <span className="text-[10px] font-black uppercase tracking-widest">BACKEND_STATUS:</span>
+                  <span className="font-black uppercase tracking-widest">
+                    {backendRouteStatus === 'online' ? 'READY_FOR_MCP' : backendRouteStatus === 'offline' ? 'ROUTES_OFFLINE' : 'NOT_TESTED'}
+                  </span>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-3">
+                  <Button
+                    onClick={handleTestMcpBackend}
+                    variant="secondary"
+                    className="w-full"
+                    isLoading={isTestingMcpBackend}
+                  >
+                    TEST_BACKEND
+                  </Button>
+                  <Button
+                    onClick={handleSaveMcpConfig}
+                    variant="primary"
+                    className="w-full"
+                  >
+                    SAVE_MCP_CONFIG
+                  </Button>
+                  <Button
+                    onClick={handleCopyMcpConfig}
+                    variant="primary"
+                    className="w-full"
+                  >
+                    {mcpCopied ? 'COPIED' : 'COPY_CONFIG'}
+                  </Button>
+                </div>
+
+                {mcpTestDetails && (
+                  <div className="p-4 neo-border-sm bg-neo-bg">
+                    <p className="text-[10px] font-black uppercase tracking-widest mb-2 opacity-50">ROUTE_TEST_LOG:</p>
+                    <pre className="text-[10px] font-bold whitespace-pre-wrap">{mcpTestDetails}</pre>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-50">CONFIG_TARGET:</p>
+                    <p className="text-[10px] font-bold uppercase text-right">{getMcpConfigLocation(mcpConfig.selectedClient)}</p>
+                  </div>
+
+                  <textarea
+                    readOnly
+                    value={generatedMcpConfig}
+                    className="w-full min-h-[260px] neo-border-sm bg-neo-black text-white p-4 text-[10px] font-mono leading-relaxed"
+                  />
+                </div>
+
+                <div className="p-4 neo-border-sm bg-neo-muted space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest">QUICK_SETUP</p>
+                  <ol className="text-[10px] font-bold text-neo-black/70 uppercase tracking-wider space-y-1 list-decimal list-inside">
+                    <li>Keep SteadySocial Electron running.</li>
+                    <li>Run npm run build inside steadysocial-mcp-server.</li>
+                    <li>Copy this config into your selected external agent.</li>
+                    <li>Restart the external agent.</li>
+                    <li>Ask it to use SteadySocial MCP tools.</li>
+                  </ol>
+                </div>
+              </div>
+            </Card>
+          </section>
+
+          <section className="space-y-10">
+            <Card title="GRAPH_API_CONTROL" className="!p-8 neo-shadow-lg bg-neo-muted">
+              <div className="space-y-8">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest mb-4">GRAPH_API v23.0</h3>
+                  <p className="text-[10px] font-bold text-neo-black/60 mb-4 uppercase tracking-wider">
+                    Direct requests to graph.facebook.com/{'{pageId}'} — No SDK required
+                  </p>
+                  {connectedPageName && mainAppLoginStatus === 'connected' && (
+                    <div className="p-3 neo-border-sm bg-neo-secondary mb-4 flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-widest">LINKED_PAGE:</span>
+                      <span className="font-black uppercase text-sm">{connectedPageName}</span>
+                    </div>
+                  )}
+                  {mainAppLoginStatus !== 'connected' ? (
+                    <Button
+                      onClick={handleConnect}
+                      variant="primary"
+                      className="w-full py-4"
+                      disabled={!initialFbSettings?.accessToken || !initialFbSettings?.pageId}
+                      isLoading={isFbProcessing}
+                    >
+                      TEST_CONNECTION
+                    </Button>
+                  ) : (
+                    <Button onClick={handleDisconnect} variant="danger" className="w-full py-4">
+                      DISCONNECT
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </Card>
+
+            <Card title="AI_AGENT_KNOWLEDGE_BASE" className="!p-8 neo-shadow-lg bg-white">
+              <div className="space-y-6">
+                <div className="p-4 neo-border-sm bg-neo-muted">
+                  <label className="block text-[10px] font-black uppercase tracking-widest mb-2">UPLOAD_CONTEXT (.MD)</label>
+                  <input
+                    type="file"
+                    accept=".md"
+                    onChange={handleFileUpload}
+                    className="block w-full text-xs text-neo-black file:mr-4 file:py-2 file:px-4 file:neo-border-sm file:bg-neo-black file:text-white file:font-black file:uppercase file:text-[10px] hover:file:bg-neo-accent cursor-pointer"
+                  />
+                </div>
+
+                {aiAgentContext && (
+                  <div className="space-y-4">
+                    <div className="p-4 neo-border-sm bg-neo-bg max-h-40 overflow-y-auto">
+                      <pre className="text-[10px] font-bold whitespace-pre-wrap">{aiAgentContext}</pre>
+                    </div>
+
+                    <div className="neo-border-t pt-4">
+                      <label className="block text-[10px] font-black uppercase tracking-widest mb-2">TEST_INQUIRY</label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="testInquiry"
+                          value={testInquiry}
+                          onChange={e => setTestInquiry(e.target.value)}
+                          placeholder="Type something to test context..."
+                          className="flex-grow !mb-0"
+                        />
+                        <Button onClick={handleTestContext} variant="secondary" size="sm" isLoading={isTestingContext}>
+                          TEST
+                        </Button>
+                      </div>
+                      {testResponse && (
+                        <div className="mt-4 p-4 neo-border-sm bg-neo-secondary/20">
+                          <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-50">AGENT_RESPONSE:</p>
+                          <p className="text-xs font-bold">{testResponse}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <Button
+                  onClick={handleSaveFacebookConfig}
+                  variant="primary"
+                  className="w-full !py-4"
+                  isLoading={isSavingConfig}
+                  disabled={!aiAgentContext}
+                >
+                  SYNC_KNOWLEDGE_BASE
+                </Button>
+              </div>
+            </Card>
+
+            <Card title="MARKETING_OS_MODULES" className="!p-8 neo-shadow-lg bg-white border-neo-accent">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center p-3 bg-neo-bg neo-border-sm">
+                  <span className="text-xs font-black uppercase tracking-tight">Campaign Planner</span>
+                  <span className="bg-neo-secondary text-[8px] font-black px-2 py-0.5 neo-border-sm uppercase">STABLE</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-neo-bg neo-border-sm">
+                  <span className="text-xs font-black uppercase tracking-tight">Social Scheduler</span>
+                  <span className="bg-neo-secondary text-[8px] font-black px-2 py-0.5 neo-border-sm uppercase">ACTIVE</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-neo-bg neo-border-sm">
+                  <span className="text-xs font-black uppercase tracking-tight">Analytics Terminal</span>
+                  <span className="bg-neo-accent text-white text-[8px] font-black px-2 py-0.5 neo-border-sm uppercase">CONNECTED</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-neo-bg neo-border-sm">
+                  <span className="text-xs font-black uppercase tracking-tight">External MCP Bridge</span>
+                  <span className="bg-neo-secondary text-[8px] font-black px-2 py-0.5 neo-border-sm uppercase">CONFIGURABLE</span>
+                </div>
+              </div>
+            </Card>
+          </section>
+        </div>
+      </main>
     </div>
   );
 };
 
-export const Settings = SettingsPage;
 export default SettingsPage;
