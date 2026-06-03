@@ -2,6 +2,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FacebookSettings, FacebookPage } from '../types';
 import { dbGetFacebookSettings } from '../services/settingsService';
 import useFacebookSDK from '../hooks/useFacebookSDK';
+import {
+  ConfiguredFacebookPage,
+  MultiPageFacebookSettings,
+  getDefaultFacebookPage,
+  getFacebookPageAccessToken,
+  normalizeFacebookPages,
+} from '../utils/facebookPageUtils';
 import { useAutoUpdateData } from '../hooks/useAutoUpdateData';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -23,9 +30,9 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
 const FacebookSchedulerPage: React.FC = () => {
-  const [fbSettings, setFbSettings] = useState<FacebookSettings | null>(null);
-  const [fbPages, setFbPages] = useState<FacebookPage[]>([]);
-  const [selectedPage, setSelectedPage] = useState<FacebookPage | null>(null);
+  const [fbSettings, setFbSettings] = useState<MultiPageFacebookSettings | null>(null);
+  const [fbPages, setFbPages] = useState<ConfiguredFacebookPage[]>([]);
+  const [selectedPage, setSelectedPage] = useState<ConfiguredFacebookPage | null>(null);
   const [postText, setPostText] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -285,8 +292,14 @@ const FacebookSchedulerPage: React.FC = () => {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const settings = await dbGetFacebookSettings();
+        const settings = (await dbGetFacebookSettings()) as MultiPageFacebookSettings;
+        const pages = normalizeFacebookPages(settings);
+        const defaultPage = getDefaultFacebookPage(pages, settings);
+
         setFbSettings(settings);
+        setFbPages(pages);
+        setSelectedPage(defaultPage);
+        setIsLoggedIn(pages.length > 0);
       } catch (err) {
         console.error("Failed to load FB settings:", err);
       }
@@ -304,27 +317,34 @@ const FacebookSchedulerPage: React.FC = () => {
     loadPlanFiles();
   }, []);
 
+  const selectedPageAccessToken = getFacebookPageAccessToken(selectedPage);
+
   const { fbApi } = useFacebookSDK(
     fbSettings?.appId,
     undefined,
-    fbSettings?.accessToken
+    selectedPageAccessToken || fbSettings?.accessToken
   );
 
-  // Auto-connect when we have an access token and page ID
+  // Page credentials are loaded from Settings. Each added page can be selected here.
   useEffect(() => {
-    if (fbSettings?.accessToken && fbSettings?.pageId && fbApi && !isLoggedIn) {
-      fbApi<FacebookPage>(`/${fbSettings.pageId}?fields=id,name`)
-        .then(pageInfo => {
-          const page: FacebookPage = { id: pageInfo.id, name: pageInfo.name, access_token: fbSettings.accessToken };
-          setFbPages([page]);
-          setSelectedPage(page);
-          setIsLoggedIn(true);
-        })
-        .catch(err => {
-          console.error('Error connecting to page:', err);
-        });
+    if (!fbSettings) return;
+
+    const pages = normalizeFacebookPages(fbSettings);
+    if (pages.length === 0) {
+      setIsLoggedIn(false);
+      setSelectedPage(null);
+      return;
     }
-  }, [fbSettings?.accessToken, fbSettings?.pageId, fbApi, isLoggedIn]);
+
+    setFbPages(pages);
+    setSelectedPage(prev => {
+      if (prev && pages.some(page => page.id === prev.id)) {
+        return pages.find(page => page.id === prev.id) || prev;
+      }
+      return getDefaultFacebookPage(pages, fbSettings);
+    });
+    setIsLoggedIn(true);
+  }, [fbSettings]);
 
   // Sync live scheduled posts from actual Meta / Facebook page
   const syncScheduledPosts = useCallback(async () => {
@@ -332,7 +352,8 @@ const FacebookSchedulerPage: React.FC = () => {
     try {
       const response = await fbApi<{ data: any[] }>(
         `/${selectedPage.id}/scheduled_posts`,
-        'get'
+        'get',
+        { access_token: selectedPage.access_token }
       );
       
       if (response && response.data) {
@@ -346,6 +367,7 @@ const FacebookSchedulerPage: React.FC = () => {
             text: post.message || '[MEDIA/ATTACHMENT]',
             time: scheduledTime,
             page: selectedPage.name,
+            pageId: selectedPage.id,
             status: 'SCHEDULED' as const,
             recordedAt: post.scheduled_publish_time 
               ? post.scheduled_publish_time * 1000 
@@ -408,6 +430,10 @@ const FacebookSchedulerPage: React.FC = () => {
         implementationFile: orchestrationType === 'IMPLEMENTATION' ? selectedFile : undefined,
         completionPercentage: orchestrationType !== 'POST' ? (milestones.length > 0 ? Math.round((milestones.filter(m => m.completed).length / milestones.length) * 100) : 0) : undefined
       };
+
+      if (selectedPage?.id) {
+        (newEntry as any).pageId = selectedPage.id;
+      }
 
       if (orchestrationType === 'POST') {
         if (isLoggedIn && selectedPage) {
@@ -594,9 +620,20 @@ const FacebookSchedulerPage: React.FC = () => {
     return days;
   };
 
+  const isSchedulerItemForSelectedPage = (post: SchedulerHistoryEntry) => {
+    if (!selectedPage) return true;
+
+    // Tactical tasks and implementation records are workspace-level.
+    // Social posts are page-level and should follow the selected Facebook page.
+    if (post.type && post.type !== 'POST') return true;
+
+    return (post as any).pageId === selectedPage.id || post.page === selectedPage.name || post.page === selectedPage.id;
+  };
+
   // Helper to query scheduled items per date (including type filters!)
   const getPostsForDate = (date: Date) => {
     return scheduledPosts.filter(post => {
+      if (!isSchedulerItemForSelectedPage(post)) return false;
       // Apply filters
       if (filterType === 'POST' && (post.type && post.type !== 'POST')) return false;
       if (filterType === 'TASK' && post.type !== 'TASK') return false;
@@ -670,6 +707,7 @@ const FacebookSchedulerPage: React.FC = () => {
   // Tactical Timeline History Utility Functions
   const filterAndSortHistory = () => {
     let filtered = scheduledPosts.filter(post => {
+      if (!isSchedulerItemForSelectedPage(post)) return false;
       // Type filter
       if (filterType === 'POST' && (post.type && post.type !== 'POST')) return false;
       if (filterType === 'TASK' && post.type !== 'TASK') return false;
@@ -1484,7 +1522,7 @@ const FacebookSchedulerPage: React.FC = () => {
                               const page = fbPages.find(p => p.id === e.target.value);
                               setSelectedPage(page || null);
                             }}
-                            options={fbPages.map(p => ({ value: p.id, label: p.name.toUpperCase() }))}
+                            options={fbPages.map(p => ({ value: p.id, label: (p.name || p.id).toUpperCase() }))}
                             placeholder="SELECT_DESTINATION_PAGE"
                           />
                           {!isLoggedIn && (

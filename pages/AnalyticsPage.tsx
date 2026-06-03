@@ -4,6 +4,13 @@ import Card from '../components/ui/Card';
 import { dbGetFacebookSettings } from '../services/settingsService';
 import { FacebookSettings, CanvasStatus } from '../types';
 import useFacebookSDK from '../hooks/useFacebookSDK';
+import {
+  ConfiguredFacebookPage,
+  MultiPageFacebookSettings,
+  getDefaultFacebookPage,
+  getFacebookPageAccessToken,
+  normalizeFacebookPages,
+} from '../utils/facebookPageUtils';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Alert from '../components/ui/Alert';
 import Button from '../components/ui/Button';
@@ -81,10 +88,12 @@ const KpiCard: React.FC<{
 );
 
 const AnalyticsPage: React.FC = () => {
-  const [fbSettings, setFbSettings] = useState<FacebookSettings | null>(null);
+  const [fbSettings, setFbSettings] = useState<MultiPageFacebookSettings | null>(null);
   const [isLoadingFbSettings, setIsLoadingFbSettings] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [localPageError, setLocalPageError] = useState<string | null>(null);
+  const [fbPages, setFbPages] = useState<ConfiguredFacebookPage[]>([]);
+  const [selectedPage, setSelectedPage] = useState<ConfiguredFacebookPage | null>(null);
 
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('FACEBOOK');
 
@@ -116,6 +125,7 @@ const AnalyticsPage: React.FC = () => {
     isLoadingAnalytics,
     analyticsError: contextError,
     loadAnalytics,
+    setAnalyticsPage,
   } = useAnalytics();
 
   useEffect(() => {
@@ -124,8 +134,13 @@ const AnalyticsPage: React.FC = () => {
       setLocalPageError(null);
 
       try {
-        const settings = await dbGetFacebookSettings();
+        const settings = (await dbGetFacebookSettings()) as MultiPageFacebookSettings;
+        const pages = normalizeFacebookPages(settings);
+        const defaultPage = getDefaultFacebookPage(pages, settings);
+
         setFbSettings(settings);
+        setFbPages(pages);
+        setSelectedPage(defaultPage);
 
         if (!settings.appId) {
           setLocalPageError(
@@ -134,16 +149,16 @@ const AnalyticsPage: React.FC = () => {
           return;
         }
 
-        if (!settings.pageId) {
+        if (pages.length === 0 || !defaultPage) {
           setLocalPageError(
-            'Facebook Page ID is not configured. Please set it in Settings.'
+            'No Facebook pages are configured. Add pages in Settings first.'
           );
           return;
         }
 
-        if (!settings.accessToken) {
+        if (!getFacebookPageAccessToken(defaultPage)) {
           setLocalPageError(
-            'Facebook Page Access Token is not configured. Please set it in Settings.'
+            'The selected Facebook Page Access Token is not configured.'
           );
           return;
         }
@@ -163,13 +178,20 @@ const AnalyticsPage: React.FC = () => {
       try {
         // Scheduler
         const history = await dbGetSchedulerHistory();
-        setSchedulerTotal(history.length);
+        const pageScopedHistory = selectedPage
+          ? history.filter((h: any) =>
+              h.pageId === selectedPage.id ||
+              h.page === selectedPage.name ||
+              h.page === selectedPage.id
+            )
+          : history;
+        setSchedulerTotal(pageScopedHistory.length);
         const now = Date.now();
-        const pendingCount = history.filter(h => new Date(h.time).getTime() > now).length;
+        const pendingCount = pageScopedHistory.filter(h => new Date(h.time).getTime() > now).length;
         setSchedulerPending(pendingCount);
 
         // Canvases
-        const canvases = await dbFetchCanvases();
+        const canvases = await (dbFetchCanvases as any)(selectedPage?.id);
         setCanvasesTotal(canvases.length);
         setCanvasesDraft(canvases.filter(c => c.status === CanvasStatus.DRAFT).length);
         setCanvasesReady(canvases.filter(c => c.status === CanvasStatus.APPROVED || c.status === CanvasStatus.PENDING_REVIEW).length);
@@ -188,12 +210,19 @@ const AnalyticsPage: React.FC = () => {
 
         // Leads
         const leads = await dbGetLeads();
-        setLeadsTotal(leads.length);
-        setLeadsNew(leads.filter(l => l.status === 'NEW').length);
-        setLeadsConverted(leads.filter(l => l.status === 'WON' || l.status === 'QUALIFIED').length);
+        const pageScopedLeads = selectedPage
+          ? leads.filter((l: any) =>
+              !l.facebookPageId ||
+              l.facebookPageId === selectedPage.id ||
+              l.facebookPageName === selectedPage.name
+            )
+          : leads;
+        setLeadsTotal(pageScopedLeads.length);
+        setLeadsNew(pageScopedLeads.filter(l => l.status === 'NEW').length);
+        setLeadsConverted(pageScopedLeads.filter(l => l.status === 'WON' || l.status === 'QUALIFIED').length);
 
         // Messages
-        const states = await chatDbService.getAllConversationStates();
+        const states = await chatDbService.getAllConversationStates(selectedPage?.id);
         setMessagesTotal(Object.keys(states).length);
 
       } catch (e) {
@@ -202,19 +231,52 @@ const AnalyticsPage: React.FC = () => {
     };
 
     fetchOtherData();
-  }, []);
+  }, [selectedPage?.id, selectedPage?.name]);
+
+  const selectedPageAccessToken = getFacebookPageAccessToken(selectedPage);
 
   const { fbApi, error: sdkError } = useFacebookSDK(
     fbSettings?.appId,
     undefined,
-    fbSettings?.accessToken
+    selectedPageAccessToken || fbSettings?.accessToken
+  );
+
+  const pageScopedFbApi = React.useCallback(
+    async <T,>(
+      path: string,
+      method: 'get' | 'post' | 'delete' = 'get',
+      params: Record<string, any> = {}
+    ): Promise<T> => {
+      if (!selectedPage || !fbApi) {
+        throw new Error('No Facebook page selected.');
+      }
+
+      const legacyPageId = fbSettings?.pageId;
+      let scopedPath = path;
+
+      if (legacyPageId && scopedPath === `/${legacyPageId}`) {
+        scopedPath = `/${selectedPage.id}`;
+      } else if (legacyPageId && scopedPath.startsWith(`/${legacyPageId}/`)) {
+        scopedPath = `/${selectedPage.id}${scopedPath.slice(legacyPageId.length + 1)}`;
+      } else if (scopedPath === '/me') {
+        scopedPath = `/${selectedPage.id}`;
+      }
+
+      return fbApi<T>(scopedPath, method, {
+        ...params,
+        access_token: selectedPage.access_token,
+      });
+    },
+    [fbApi, fbSettings?.pageId, selectedPage]
   );
 
   useEffect(() => {
-    if (fbSettings?.accessToken && fbSettings?.pageId && !isLoggedIn) {
-      setIsLoggedIn(true);
-    }
-  }, [fbSettings?.accessToken, fbSettings?.pageId, isLoggedIn]);
+    setAnalyticsPage(selectedPage);
+  }, [selectedPage?.id, selectedPage?.name, selectedPageAccessToken, setAnalyticsPage]);
+
+  useEffect(() => {
+    setIsLoggedIn(Boolean(selectedPage?.id && selectedPageAccessToken));
+  }, [selectedPage?.id, selectedPageAccessToken]);
 
   useEffect(() => {
     if (sdkError) {
@@ -225,26 +287,26 @@ const AnalyticsPage: React.FC = () => {
     if (
       isLoggedIn &&
       fbSettings &&
-      fbApi &&
+      pageScopedFbApi &&
       fbSettings.appId &&
-      fbSettings.pageId &&
-      fbSettings.accessToken
+      selectedPage?.id &&
+      selectedPageAccessToken
     ) {
       setLocalPageError(null);
-      loadAnalytics(fbApi);
+      loadAnalytics(pageScopedFbApi, false, selectedPage);
     }
-  }, [isLoggedIn, fbSettings, fbApi, loadAnalytics, sdkError]);
+  }, [isLoggedIn, fbSettings, pageScopedFbApi, loadAnalytics, sdkError, selectedPage?.id, selectedPageAccessToken]);
 
   const handleRefreshData = () => {
     if (
       fbSettings &&
-      fbApi &&
+      pageScopedFbApi &&
       fbSettings.appId &&
-      fbSettings.pageId &&
-      fbSettings.accessToken
+      selectedPage?.id &&
+      selectedPageAccessToken
     ) {
       setLocalPageError(null);
-      loadAnalytics(fbApi, true);
+      loadAnalytics(pageScopedFbApi, true, selectedPage);
     } else {
       setLocalPageError(
         'Cannot refresh: Facebook settings or access token is missing.'
@@ -604,7 +666,26 @@ const AnalyticsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-end w-full md:w-auto">
+          <div className="min-w-[240px]">
+            <label className="block text-[10px] font-black uppercase tracking-widest mb-2 opacity-60">TARGET_PAGE</label>
+            <select
+              value={selectedPage?.id || ''}
+              onChange={event => {
+                const page = fbPages.find(item => item.id === event.target.value);
+                setSelectedPage(page || null);
+              }}
+              className="w-full p-3 neo-border-sm bg-white text-xs font-black uppercase tracking-widest"
+              disabled={fbPages.length === 0 || isLoadingAnalytics}
+            >
+              {fbPages.map(page => (
+                <option key={page.id} value={page.id}>
+                  {(page.name || page.id).toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <Button
             onClick={handleExportPDF}
             variant="secondary"
@@ -665,7 +746,7 @@ const AnalyticsPage: React.FC = () => {
                   ACCESS_TOKEN_REQUIRED
                 </p>
                 <p className="text-[10px] font-bold text-neo-black/50">
-                  Configure your Facebook App ID, Page ID, and Page Access Token
+                  Configure your Facebook App ID and at least one Facebook page in Settings
                   in Settings.
                 </p>
               </div>

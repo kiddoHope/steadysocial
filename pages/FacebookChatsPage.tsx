@@ -36,6 +36,15 @@ import {
 } from '../services/messengerAiService';
 import { dbCreateLead, dbGetLeads, dbUpdateLead } from '../services/crmService';
 import useFacebookSDK from '../hooks/useFacebookSDK';
+import {
+  ConfiguredFacebookPage,
+  MultiPageFacebookSettings,
+  getDefaultFacebookPage,
+  getFacebookPageAccessToken,
+  getPageAiAgentContext,
+  getScopedConversationSettingsKey,
+  normalizeFacebookPages,
+} from '../utils/facebookPageUtils';
 import Alert from '../components/ui/Alert';
 import Button from '../components/ui/Button';
 import Select from '../components/ui/Select';
@@ -218,10 +227,10 @@ const ConversationRow = memo(
 ConversationRow.displayName = 'ConversationRow';
 
 const FacebookChatsPage: React.FC = () => {
-  const [fbSettings, setFbSettings] = useState<FacebookSettings | null>(null);
+  const [fbSettings, setFbSettings] = useState<MultiPageFacebookSettings | null>(null);
   const [isLoadingFbSettings, setIsLoadingFbSettings] = useState(true);
-  const [fbPages, setFbPages] = useState<FacebookPage[]>([]);
-  const [selectedPage, setSelectedPage] = useState<FacebookPage | null>(null);
+  const [fbPages, setFbPages] = useState<ConfiguredFacebookPage[]>([]);
+  const [selectedPage, setSelectedPage] = useState<ConfiguredFacebookPage | null>(null);
   const [conversations, setConversations] = useState<FacebookConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<FacebookMessage[]>([]);
@@ -253,28 +262,36 @@ const FacebookChatsPage: React.FC = () => {
 
   const refreshStatesMap = useCallback(async () => {
     try {
-      const states = await chatDbService.getAllConversationStates();
+      const states = await chatDbService.getAllConversationStates(selectedPage?.id);
       setConversationStatesMap(states);
     } catch (err) {
       console.error('Failed to load conversation states map:', err);
     }
-  }, []);
+  }, [selectedPage?.id]);
 
   const syncLeadToCore = useCallback(async (conversationId: string, details: CustomerDetails) => {
     if (!details.fullName) return;
     try {
       const leads = await dbGetLeads();
-      const existingLead = leads.find(l => l.messengerConversationId === conversationId);
+      const existingLead = leads.find((l: any) =>
+        l.messengerConversationId === conversationId &&
+        (!selectedPage?.id || !l.facebookPageId || l.facebookPageId === selectedPage.id)
+      );
 
       const leadData = {
         name: details.fullName,
         phone: details.contactNumber || undefined,
         email: details.email || undefined,
-        notes: details.address ? `Address: ${details.address}` : undefined,
+        notes: [
+          selectedPage?.name ? `Facebook Page: ${selectedPage.name}` : undefined,
+          details.address ? `Address: ${details.address}` : undefined,
+        ].filter(Boolean).join('\n') || undefined,
         source: 'MESSENGER' as const,
         status: (existingLead?.status || 'NEW') as any,
         messengerConversationId: conversationId,
-      };
+        facebookPageId: selectedPage?.id,
+        facebookPageName: selectedPage?.name,
+      } as any;
 
       if (existingLead) {
         await dbUpdateLead(existingLead.id, leadData);
@@ -287,7 +304,7 @@ const FacebookChatsPage: React.FC = () => {
     } catch (err) {
       console.warn('[LeadCore] Failed to sync lead to Core:', err);
     }
-  }, []);
+  }, [selectedPage?.id, selectedPage?.name]);
 
   const [hasProductDb, setHasProductDb] = useState(false);
   const [hasBusinessDb, setHasBusinessDb] = useState(false);
@@ -312,26 +329,51 @@ const FacebookChatsPage: React.FC = () => {
   }, [conversations, selectedConversationId]);
 
   const selectedPageId = selectedPage?.id;
-  const selectedPageAccessToken = selectedPage?.access_token;
+  const selectedPageAccessToken = getFacebookPageAccessToken(selectedPage);
+  const selectedPageContext = getPageAiAgentContext(fbSettings, selectedPage?.id);
+
+  const isConversationAiEnabled = useCallback(
+    (conversationId: string) => {
+      const enabled = fbSettings?.aiEnabledConversations || [];
+      const scopedKey = getScopedConversationSettingsKey(selectedPage?.id, conversationId);
+      return enabled.includes(scopedKey) || enabled.includes(conversationId);
+    },
+    [fbSettings?.aiEnabledConversations, selectedPage?.id]
+  );
+
+  const refreshPageDatabases = useCallback(async (pageId?: string | null) => {
+    const prod = await chatDbService.getProductData(pageId);
+    const biz = await chatDbService.getBusinessData(pageId);
+    setHasProductDb(!!prod);
+    setHasBusinessDb(!!biz);
+  }, []);
 
   useEffect(() => {
     const loadSettings = async () => {
       setIsLoadingFbSettings(true);
 
       try {
-        const settings = await dbGetFacebookSettings();
+        const settings = (await dbGetFacebookSettings()) as MultiPageFacebookSettings;
+        const pages = normalizeFacebookPages(settings);
+        const defaultPage = getDefaultFacebookPage(pages, settings);
+
         setFbSettings(settings);
+        setFbPages(pages);
+        setSelectedPage(defaultPage);
+        setIsLoggedIn(pages.length > 0);
 
         if (!settings.appId) {
           setError('FACEBOOK_APP_ID_MISSING');
         }
 
-        // Check local DB existence
-        const prod = await chatDbService.getProductData();
-        const biz = await chatDbService.getBusinessData();
-        setHasProductDb(!!prod);
-        setHasBusinessDb(!!biz);
-        await refreshStatesMap();
+        if (pages.length === 0) {
+          setError('NO_FACEBOOK_PAGES_CONFIGURED');
+        }
+
+        // Check local DB existence for the selected/default page.
+        await refreshPageDatabases(defaultPage?.id);
+        const states = await chatDbService.getAllConversationStates(defaultPage?.id);
+        setConversationStatesMap(states);
       } catch (err) {
         console.error('Failed to load FB settings for Chats:', err);
         setError('SETTINGS_LOAD_FAILURE');
@@ -346,7 +388,7 @@ const FacebookChatsPage: React.FC = () => {
   const { fbApi, error: sdkError } = useFacebookSDK(
     fbSettings?.appId,
     undefined,
-    fbSettings?.accessToken
+    selectedPageAccessToken || fbSettings?.accessToken
   );
 
   useEffect(() => {
@@ -356,45 +398,10 @@ const FacebookChatsPage: React.FC = () => {
   }, [sdkError]);
 
   useEffect(() => {
-    if (!fbSettings?.accessToken || !fbSettings?.pageId || !fbApi || isLoggedIn) {
-      return;
-    }
-
-    let isMounted = true;
-
-    setIsLoadingPages(true);
-    setError(null);
-
-    fbApi<FacebookPage>(`/${fbSettings.pageId}?fields=id,name`)
-      .then(pageInfo => {
-        if (!isMounted) return;
-
-        const page: FacebookPage = {
-          id: pageInfo.id,
-          name: pageInfo.name,
-          access_token: fbSettings.accessToken,
-        };
-
-        setFbPages([page]);
-        setSelectedPage(page);
-        setIsLoggedIn(true);
-      })
-      .catch(err => {
-        if (!isMounted) return;
-
-        console.error('Error connecting to Facebook page:', err);
-        setError(`PAGE_CONNECT_ERROR: ${err.message}`);
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoadingPages(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [fbSettings?.accessToken, fbSettings?.pageId, fbApi, isLoggedIn]);
+    if (!selectedPage?.id) return;
+    refreshPageDatabases(selectedPage.id);
+    refreshStatesMap();
+  }, [selectedPage?.id, refreshPageDatabases, refreshStatesMap]);
 
   const fetchConversations = useCallback(
     async (page: FacebookPage) => {
@@ -638,7 +645,7 @@ const FacebookChatsPage: React.FC = () => {
     setSelectedConversationId(conversationId);
     setFollowUpDraftText('');
     try {
-      const state = await chatDbService.getConversationState(conversationId);
+      const state = await chatDbService.getConversationState(conversationId, selectedPage?.id);
       setConversationState(state);
       setRemarksText(state.remarks || '');
       setDetailsState(state.customerDetails || {});
@@ -750,11 +757,12 @@ const FacebookChatsPage: React.FC = () => {
       if (!fbSettings) return;
 
       const currentEnabled = fbSettings.aiEnabledConversations || [];
-      const isEnabled = currentEnabled.includes(conversationId);
+      const scopedConversationId = getScopedConversationSettingsKey(selectedPage?.id, conversationId);
+      const isEnabled = currentEnabled.includes(scopedConversationId) || currentEnabled.includes(conversationId);
 
       const newEnabled = isEnabled
-        ? currentEnabled.filter(id => id !== conversationId)
-        : [...currentEnabled, conversationId];
+        ? currentEnabled.filter(id => id !== scopedConversationId && id !== conversationId)
+        : [...currentEnabled, scopedConversationId];
 
       const updatedSettings = {
         ...fbSettings,
@@ -763,10 +771,10 @@ const FacebookChatsPage: React.FC = () => {
 
       setFbSettings(updatedSettings);
       await dbSaveFacebookSettings({ aiEnabledConversations: newEnabled });
-      await chatDbService.toggleAi(conversationId, isEnabled ? 'disabled' : 'enabled');
+      await chatDbService.toggleAi(conversationId, isEnabled ? 'disabled' : 'enabled', selectedPage?.id);
       refreshStatesMap();
     },
-    [fbSettings, refreshStatesMap]
+    [fbSettings, refreshStatesMap, selectedPage?.id]
   );
 
 
@@ -777,18 +785,18 @@ const FacebookChatsPage: React.FC = () => {
     setIsDraftingFollowUp(true);
     setFollowUpDraftText('');
     try {
-      let businessInfo = await chatDbService.getBusinessData();
+      let businessInfo = await chatDbService.getBusinessData(selectedPage?.id);
       if (!businessInfo) {
         businessInfo = {
           businessInfo: {
             name: selectedPage?.name || 'our business',
           },
-          faq: fbSettings.aiAgentContext,
+          faq: selectedPageContext,
         };
       }
 
-      const allProducts = await chatDbService.getProductData() || { product_categories: [] };
-      const currentConvState = await chatDbService.getConversationState(selectedConversation.id);
+      const allProducts = await chatDbService.getProductData(selectedPage?.id) || { product_categories: [] };
+      const currentConvState = await chatDbService.getConversationState(selectedConversation.id, selectedPage?.id);
 
       const chatMessages: ChatMessage[] = messages.map(msg => ({
         id: msg.id,
@@ -845,7 +853,7 @@ const FacebookChatsPage: React.FC = () => {
         setMatchedProductsPreview([]);
         return;
       }
-      const allProducts = await chatDbService.getProductData();
+      const allProducts = await chatDbService.getProductData(selectedPage?.id);
       if (!allProducts) {
         setMatchedProductsPreview([]);
         return;
@@ -862,7 +870,7 @@ const FacebookChatsPage: React.FC = () => {
     const handleCrmUpdated = (e: any) => {
       if (selectedConversationId && e.detail.conversationId === selectedConversationId) {
         refreshStatesMap();
-        chatDbService.getConversationState(selectedConversationId).then(state => {
+        chatDbService.getConversationState(selectedConversationId, selectedPage?.id).then(state => {
           setConversationState(state);
           setRemarksText(state.remarks || '');
           setDetailsState(state.customerDetails || {});
@@ -912,7 +920,7 @@ const FacebookChatsPage: React.FC = () => {
 
   const handleSetCustomerStatus = async (status: CustomerStatus) => {
     if (!selectedConversation) return;
-    await chatDbService.saveCustomerStatus(selectedConversation.id, status);
+    await chatDbService.saveCustomerStatus(selectedConversation.id, status, selectedPage?.id);
     setConversationState(prev => prev ? { ...prev, customerStatus: status } : null);
     refreshStatesMap();
   };
@@ -924,7 +932,7 @@ const FacebookChatsPage: React.FC = () => {
     try {
       const text = await file.text();
       const json = JSON.parse(text);
-      await chatDbService.saveBusinessData(json);
+      await chatDbService.saveBusinessData(json, selectedPage?.id);
       setHasBusinessDb(true);
       alert('Business FAQ database loaded successfully!');
     } catch (err: any) {
@@ -987,7 +995,7 @@ const FacebookChatsPage: React.FC = () => {
       }, [] as any[]);
 
       const finalJson = { product_categories: categories };
-      await chatDbService.saveProductData(finalJson);
+      await chatDbService.saveProductData(finalJson, selectedPage?.id);
       setHasProductDb(true);
       alert('Product database loaded successfully!');
     } catch (err: any) {
@@ -1079,7 +1087,7 @@ const FacebookChatsPage: React.FC = () => {
               onChange={handlePageChange}
               options={fbPages.map(page => ({
                 value: page.id,
-                label: page.name.toUpperCase(),
+                label: (page.name || page.id).toUpperCase(),
               }))}
               placeholder="SELECT_NODE_TARGET"
               disabled={isLoadingPages || fbPages.length === 0}
@@ -1127,7 +1135,7 @@ const FacebookChatsPage: React.FC = () => {
                 ) : (
                   <div className="flex-grow overflow-y-auto space-y-3 pr-2 max-h-[60vh]">
                     {conversations.map(conversation => {
-                      const isAiEnabled = fbSettings?.aiEnabledConversations?.includes(conversation.id) || false;
+                      const isAiEnabled = isConversationAiEnabled(conversation.id);
                       return (
                         <ConversationRow
                           key={conversation.id}
@@ -1174,18 +1182,12 @@ const FacebookChatsPage: React.FC = () => {
                         type="button"
                         onClick={() => toggleAiForConversation(selectedConversation.id)}
                         className={`px-3 py-1 neo-border-sm text-[10px] font-black transition-all ${
-                          fbSettings?.aiEnabledConversations?.includes(
-                            selectedConversation.id
-                          )
+                          isConversationAiEnabled(selectedConversation.id)
                             ? 'bg-neo-accent text-white'
                             : 'bg-neo-muted text-neo-black opacity-50'
                         }`}
                       >
-                        {fbSettings?.aiEnabledConversations?.includes(
-                          selectedConversation.id
-                        )
-                          ? 'ON'
-                          : 'OFF'}
+                        {isConversationAiEnabled(selectedConversation.id) ? 'ON' : 'OFF'}
                       </button>
                     </div>
                   )
@@ -1373,7 +1375,7 @@ const FacebookChatsPage: React.FC = () => {
                               }));
                               const sentiment = await detectSentimentFromChat(chatMessages, selectedPage?.id || '', callAI);
                               if (sentiment) {
-                                await chatDbService.saveSentiment(selectedConversation.id, sentiment);
+                                await chatDbService.saveSentiment(selectedConversation.id, sentiment, selectedPage?.id);
                               }
                               const details = await extractCustomerDetailsFromChat(chatMessages, selectedPage?.id || '', callAI);
                               if (details.fullName || details.contactNumber || details.email || details.address) {
@@ -1383,22 +1385,22 @@ const FacebookChatsPage: React.FC = () => {
                                   email: details.email || detailsState.email || '',
                                   address: details.address || detailsState.address || ''
                                 };
-                                await chatDbService.saveCustomerDetails(selectedConversation.id, merged);
+                                await chatDbService.saveCustomerDetails(selectedConversation.id, merged, selectedPage?.id);
                                 setDetailsState(merged);
                                 await syncLeadToCore(selectedConversation.id, merged);
                               }
 
                               if (details.tags && details.tags.length > 0) {
-                                await chatDbService.saveTags(selectedConversation.id, details.tags);
+                                await chatDbService.saveTags(selectedConversation.id, details.tags, selectedPage?.id);
                                 setTagsText(details.tags.join(', '));
                               }
 
                               if (details.remarks) {
-                                await chatDbService.saveRemarks(selectedConversation.id, details.remarks);
+                                await chatDbService.saveRemarks(selectedConversation.id, details.remarks, selectedPage?.id);
                                 setRemarksText(details.remarks);
                               }
 
-                              const state = await chatDbService.getConversationState(selectedConversation.id);
+                              const state = await chatDbService.getConversationState(selectedConversation.id, selectedPage?.id);
                               setConversationState(state);
                               refreshStatesMap();
                             } catch (e) {
@@ -1487,7 +1489,7 @@ const FacebookChatsPage: React.FC = () => {
                             size="sm"
                             onClick={async () => {
                               if (!selectedConversation) return;
-                              await chatDbService.saveCustomerDetails(selectedConversation.id, detailsState);
+                              await chatDbService.saveCustomerDetails(selectedConversation.id, detailsState, selectedPage?.id);
                               await syncLeadToCore(selectedConversation.id, detailsState);
                               refreshStatesMap();
                               alert('Customer profile details updated and synced to Lead Core!');
@@ -1515,7 +1517,7 @@ const FacebookChatsPage: React.FC = () => {
                           onClick={async () => {
                             if (!selectedConversation) return;
                             const newTags = tagsText.split(',').map(t => t.trim()).filter(Boolean);
-                            await chatDbService.saveTags(selectedConversation.id, newTags);
+                            await chatDbService.saveTags(selectedConversation.id, newTags, selectedPage?.id);
                             setConversationState(prev => prev ? { ...prev, tags: newTags } : null);
                             refreshStatesMap();
                             alert('Tags updated successfully!');
@@ -1540,7 +1542,7 @@ const FacebookChatsPage: React.FC = () => {
                           size="sm"
                           onClick={async () => {
                             if (!selectedConversation) return;
-                            await chatDbService.saveRemarks(selectedConversation.id, remarksText);
+                            await chatDbService.saveRemarks(selectedConversation.id, remarksText, selectedPage?.id);
                             setConversationState(prev => prev ? { ...prev, remarks: remarksText } : null);
                             refreshStatesMap();
                             alert('Agent remarks saved successfully!');
@@ -1563,7 +1565,7 @@ const FacebookChatsPage: React.FC = () => {
                         </div>
 
                         <p className="text-[9px] font-bold opacity-60 mb-4">
-                          Upload a business FAQ JSON structure to feed Business FAQ Mode.
+                          Upload a business FAQ JSON structure for the selected Facebook page.
                         </p>
 
                         <div className="space-y-3">
@@ -1601,7 +1603,7 @@ const FacebookChatsPage: React.FC = () => {
                         </div>
 
                         <p className="text-[9px] font-bold opacity-60 mb-4">
-                          Upload an Excel product sheet (.xlsx) to filter product matches locally for Product Finder Mode.
+                          Upload an Excel product sheet (.xlsx) for the selected Facebook page product finder.
                         </p>
 
                         <div className="space-y-3">
@@ -1630,7 +1632,7 @@ const FacebookChatsPage: React.FC = () => {
                       </div>
 
                       <div className="bg-neo-muted p-3 neo-border-sm text-[10px] font-bold text-center">
-                        If databases are empty, AI Agent falls back to General settings AI Agent context automatically.
+                        If this page has no local database, AI Agent falls back to this page's Settings knowledge base context.
                       </div>
                     </div>
                   ) : (
@@ -1640,19 +1642,19 @@ const FacebookChatsPage: React.FC = () => {
                       <div className="bg-white p-4 neo-border-sm -rotate-1">
                         <p className="text-[10px] font-black uppercase tracking-widest opacity-50 mb-2">AUTOPILOT_STATUS</p>
                         <div className="flex justify-between items-center gap-2">
-                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 neo-border-sm ${fbSettings?.aiEnabledConversations?.includes(selectedConversation.id) ? 'bg-neo-accent text-white animate-pulse' : 'bg-neo-muted text-neo-black'}`}>
-                            {fbSettings?.aiEnabledConversations?.includes(selectedConversation.id) ? 'ACTIVE & ONLINE' : 'INACTIVE / MANUAL'}
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 neo-border-sm ${isConversationAiEnabled(selectedConversation.id) ? 'bg-neo-accent text-white animate-pulse' : 'bg-neo-muted text-neo-black'}`}>
+                            {isConversationAiEnabled(selectedConversation.id) ? 'ACTIVE & ONLINE' : 'INACTIVE / MANUAL'}
                           </span>
                           <button
                             type="button"
                             onClick={() => toggleAiForConversation(selectedConversation.id)}
                             className={`px-3 py-1.5 neo-border-sm text-[10px] font-black uppercase tracking-widest transition-all ${
-                              fbSettings?.aiEnabledConversations?.includes(selectedConversation.id)
+                              isConversationAiEnabled(selectedConversation.id)
                                 ? 'bg-red-500 text-white hover:bg-red-600'
                                 : 'bg-neo-secondary text-neo-black hover:bg-neo-accent hover:text-white'
                             }`}
                           >
-                            {fbSettings?.aiEnabledConversations?.includes(selectedConversation.id) ? 'DEACTIVATE' : 'ACTIVATE'}
+                            {isConversationAiEnabled(selectedConversation.id) ? 'DEACTIVATE' : 'ACTIVATE'}
                           </button>
                         </div>
                       </div>
@@ -1672,7 +1674,7 @@ const FacebookChatsPage: React.FC = () => {
                                 type="button"
                                 key={mode.value}
                                 onClick={async () => {
-                                  await chatDbService.saveAutopilotMode(selectedConversation.id, mode.value as any);
+                                  await chatDbService.saveAutopilotMode(selectedConversation.id, mode.value as any, selectedPage?.id);
                                   setConversationState(prev => prev ? { ...prev, autopilotMode: mode.value as any } : null);
                                 }}
                                 className={`w-full text-left p-3 neo-border-sm transition-all flex flex-col gap-1 ${
@@ -1739,7 +1741,7 @@ const FacebookChatsPage: React.FC = () => {
                               onChange={async (e) => {
                                 const tone = e.target.value;
                                 setSelectedFollowUpTone(tone);
-                                await chatDbService.saveFollowUpTone(selectedConversation.id, tone);
+                                await chatDbService.saveFollowUpTone(selectedConversation.id, tone, selectedPage?.id);
                                 setConversationState(prev => prev ? { ...prev, followUpTone: tone } : null);
                               }}
                               className="w-full text-xs font-bold p-2 neo-border-sm bg-neo-bg focus:outline-none focus:bg-white text-neo-black"
@@ -1769,14 +1771,14 @@ const FacebookChatsPage: React.FC = () => {
                                 // Automatically generate and directly send
                                 setIsDraftingFollowUp(true);
                                 try {
-                                  let businessInfo = await chatDbService.getBusinessData();
+                                  let businessInfo = await chatDbService.getBusinessData(selectedPage?.id);
                                   if (!businessInfo) {
                                     businessInfo = {
                                       businessInfo: { name: selectedPage?.name || 'our business' },
-                                      faq: fbSettings?.aiAgentContext,
+                                      faq: selectedPageContext,
                                     };
                                   }
-                                  const allProducts = await chatDbService.getProductData() || { product_categories: [] };
+                                  const allProducts = await chatDbService.getProductData(selectedPage?.id) || { product_categories: [] };
                                   const chatMessages: ChatMessage[] = messages.map(msg => ({
                                     id: msg.id,
                                     created_time: msg.created_time,

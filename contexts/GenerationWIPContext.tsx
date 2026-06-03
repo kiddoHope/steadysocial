@@ -1,7 +1,6 @@
-import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
 import { WIPState, SocialPlatform, CaptionTone, ContentCanvas } from '../types';
 
-// Initial state, files will always be null on fresh load.
 const initialWIPState: WIPState = {
   canvasTitle: '',
   customPrompt: '',
@@ -12,17 +11,19 @@ const initialWIPState: WIPState = {
   numberOfGenerations: 1,
   imageMode: 'generate',
   overallImagePreview: null,
-  overallImageFile: null,       // Transient
+  overallImageFile: null,
   overallTextFileContent: null,
-  overallTextFile: null,        // Transient
+  overallTextFile: null,
   parsedRawItems: null,
-  activeCanvasIdForWIP: null, // ID of the ContentCanvas this WIP is for, or null for new
+  activeCanvasIdForWIP: null,
 };
 
 interface GenerationWIPContextType {
   wipState: WIPState;
+  activePageId: string | null;
+  setActivePageId: (pageId: string | null) => void;
   setWIPState: (newState: Partial<WIPState> | ((prevState: WIPState) => WIPState)) => void;
-  initializeWIPFromCanvas: (canvas: ContentCanvas | null) => void; // Pass full canvas or null for new
+  initializeWIPFromCanvas: (canvas: ContentCanvas | null) => void;
   clearWIPState: () => void;
   setWIPOverallImage: (file: File | null, preview: string | null) => void;
   setWIPOverallTextFile: (file: File | null, content: string | null) => void;
@@ -31,15 +32,59 @@ interface GenerationWIPContextType {
 
 const GenerationWIPContext = createContext<GenerationWIPContextType | undefined>(undefined);
 
+const WIP_ACTIVE_PAGE_STORAGE_KEY = 'steadysocial_generation_wip_active_page_id';
+
+const normalizeId = (value?: string | null): string => String(value || '').trim();
+
+const getCanvasPageId = (canvas?: ContentCanvas | null): string => {
+  const item = canvas as any;
+  return normalizeId(
+    item?.facebookPageId ||
+    item?.pageId ||
+    item?.targetPageId ||
+    item?.metaPageId ||
+    item?.wipStateSnapshot?.facebookPageId ||
+    item?.wipStateSnapshot?.pageId ||
+    ''
+  );
+};
+
 export const GenerationWIPProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [wipState, setWipStateInternal] = useState<WIPState>(initialWIPState);
+  const [activePageId, setActivePageIdInternal] = useState<string | null>(() => {
+    try {
+      return normalizeId(localStorage.getItem(WIP_ACTIVE_PAGE_STORAGE_KEY)) || null;
+    } catch {
+      return null;
+    }
+  });
 
-  // Set WIP state, ensuring File objects are handled correctly (i.e., remain transient)
+  const setActivePageId = useCallback((pageId: string | null) => {
+    const cleanPageId = normalizeId(pageId) || null;
+    setActivePageIdInternal(cleanPageId);
+
+    try {
+      if (cleanPageId) {
+        localStorage.setItem(WIP_ACTIVE_PAGE_STORAGE_KEY, cleanPageId);
+      } else {
+        localStorage.removeItem(WIP_ACTIVE_PAGE_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.warn('Could not persist active WIP page:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    setWipStateInternal(prev => ({
+      ...(prev as any),
+      facebookPageId: activePageId || undefined,
+      pageId: activePageId || undefined,
+    }));
+  }, [activePageId]);
+
   const setWIPState = useCallback((newStateOrCallback: Partial<WIPState> | ((prevState: WIPState) => WIPState)) => {
     setWipStateInternal(prevState => {
       const stateUpdate = typeof newStateOrCallback === 'function' ? newStateOrCallback(prevState) : newStateOrCallback;
-      
-      // If updating specific file-related fields, allow them. Otherwise, preserve existing File objects or keep them null.
       const newOverallImageFile = ('overallImageFile' in stateUpdate)
         ? (stateUpdate.overallImageFile !== undefined ? stateUpdate.overallImageFile : null)
         : prevState.overallImageFile;
@@ -48,49 +93,65 @@ export const GenerationWIPProvider: React.FC<{ children: ReactNode }> = ({ child
         : prevState.overallTextFile;
 
       return {
-        ...prevState,
-        ...stateUpdate,
+        ...(prevState as any),
+        ...(stateUpdate as any),
+        facebookPageId: activePageId || (stateUpdate as any)?.facebookPageId,
+        pageId: activePageId || (stateUpdate as any)?.pageId,
         overallImageFile: newOverallImageFile,
         overallTextFile: newOverallTextFile,
-      };
+      } as WIPState;
     });
-  }, []);
+  }, [activePageId]);
 
-  // Initializes WIP based on a loaded canvas or resets for a new one
   const initializeWIPFromCanvas = useCallback((canvas: ContentCanvas | null) => {
-    if (canvas && canvas.wipStateSnapshot) { // If canvas has a persisted WIP snapshot
+    const canvasPageId = getCanvasPageId(canvas);
+    if (canvasPageId) {
+      setActivePageId(canvasPageId);
+    }
+
+    if (canvas && canvas.wipStateSnapshot) {
       setWipStateInternal({
-        ...initialWIPState, // Start with defaults for files
-        ...canvas.wipStateSnapshot, // Load persisted text/config data
-        activeCanvasIdForWIP: canvas.id, // Link to this canvas
-         // Explicitly ensure files are null unless re-added by user interaction
+        ...(initialWIPState as any),
+        ...(canvas.wipStateSnapshot as any),
+        facebookPageId: canvasPageId || activePageId || undefined,
+        pageId: canvasPageId || activePageId || undefined,
+        activeCanvasIdForWIP: canvas.id,
         overallImageFile: null,
         overallTextFile: null,
-      });
-    } else if (canvas) { // Canvas exists but no WIP snapshot (e.g. older canvas)
-        setWipStateInternal({
-            ...initialWIPState,
-            canvasTitle: canvas.title || '',
-            customPrompt: canvas.overallCustomPrompt,
-            platformContext: canvas.overallPlatformContext,
-            tone: canvas.overallTone,
-            overallImagePreview: canvas.overallImagePreview ?? null,
-            overallTextFileContent: canvas.overallTextFileContent ?? null,
-            activeCanvasIdForWIP: canvas.id,
-            overallImageFile: null, 
-            overallTextFile: null,
-        });
+      } as WIPState);
+    } else if (canvas) {
+      setWipStateInternal({
+        ...(initialWIPState as any),
+        canvasTitle: canvas.title || '',
+        customPrompt: canvas.overallCustomPrompt,
+        platformContext: canvas.overallPlatformContext,
+        tone: canvas.overallTone,
+        overallImagePreview: canvas.overallImagePreview ?? null,
+        overallTextFileContent: canvas.overallTextFileContent ?? null,
+        facebookPageId: canvasPageId || activePageId || undefined,
+        pageId: canvasPageId || activePageId || undefined,
+        activeCanvasIdForWIP: canvas.id,
+        overallImageFile: null,
+        overallTextFile: null,
+      } as WIPState);
+    } else {
+      setWipStateInternal({
+        ...(initialWIPState as any),
+        facebookPageId: activePageId || undefined,
+        pageId: activePageId || undefined,
+        activeCanvasIdForWIP: null,
+      } as WIPState);
     }
-     else { // No canvas provided, reset to initial state for a new canvas
-      setWipStateInternal({ ...initialWIPState, activeCanvasIdForWIP: null });
-    }
-  }, []);
-  
-  const clearWIPState = useCallback(() => {
-    setWipStateInternal(initialWIPState);
-  }, []);
+  }, [activePageId, setActivePageId]);
 
-  // Specific setters for fields that include File objects, to manage their transience
+  const clearWIPState = useCallback(() => {
+    setWipStateInternal({
+      ...(initialWIPState as any),
+      facebookPageId: activePageId || undefined,
+      pageId: activePageId || undefined,
+    } as WIPState);
+  }, [activePageId]);
+
   const setWIPOverallImage = useCallback((file: File | null, preview: string | null) => {
     setWIPState(prev => ({ ...prev, overallImageFile: file, overallImagePreview: preview }));
   }, [setWIPState]);
@@ -99,22 +160,26 @@ export const GenerationWIPProvider: React.FC<{ children: ReactNode }> = ({ child
     setWIPState(prev => ({ ...prev, overallTextFile: file, overallTextFileContent: content }));
   }, [setWIPState]);
 
-  // Utility to get a "snapshot" of WIP suitable for saving (without File objects)
   const getWIPScreenshotForSave = useCallback((): Omit<WIPState, 'overallImageFile' | 'overallTextFile' | 'activeCanvasIdForWIP'> => {
-    const { overallImageFile, overallTextFile, activeCanvasIdForWIP, ...restForSave } = wipState;
-    return restForSave;
-  }, [wipState]);
-
+    const { overallImageFile, overallTextFile, activeCanvasIdForWIP, ...restForSave } = wipState as any;
+    return {
+      ...restForSave,
+      facebookPageId: activePageId || restForSave.facebookPageId,
+      pageId: activePageId || restForSave.pageId,
+    } as Omit<WIPState, 'overallImageFile' | 'overallTextFile' | 'activeCanvasIdForWIP'>;
+  }, [wipState, activePageId]);
 
   return (
-    <GenerationWIPContext.Provider value={{ 
-      wipState, 
-      setWIPState, 
+    <GenerationWIPContext.Provider value={{
+      wipState,
+      activePageId,
+      setActivePageId,
+      setWIPState,
       initializeWIPFromCanvas,
-      clearWIPState, 
-      setWIPOverallImage, 
+      clearWIPState,
+      setWIPOverallImage,
       setWIPOverallTextFile,
-      getWIPScreenshotForSave
+      getWIPScreenshotForSave,
     }}>
       {children}
     </GenerationWIPContext.Provider>

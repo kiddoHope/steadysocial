@@ -19,6 +19,12 @@ import {
   AutomationAction,
   AutomationTrigger,
 } from '../services/automationService';
+import { dbGetFacebookSettings } from '../services/settingsService';
+import {
+  MultiPageFacebookSettings,
+  getDefaultFacebookPage,
+  normalizeFacebookPages,
+} from '../utils/facebookPageUtils';
 
 export interface ChatMessage {
   id: string;
@@ -37,6 +43,9 @@ interface ChatbotContextType {
   clearError: () => void;
   pendingAgentPlan: AgentPlan | null;
   cancelPendingAgentPlan: () => void;
+  activePageId: string | null;
+  activePageName: string | null;
+  setActivePage: (pageId: string | null, pageName?: string | null) => void;
 }
 
 type AgentMode = 'chat' | 'tool' | 'clarify';
@@ -143,6 +152,8 @@ const skillMap: Array<{
 ];
 
 const createId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const normalizeId = (value?: string | null) => String(value || '').trim();
+const CHATBOT_ACTIVE_PAGE_STORAGE_KEY = 'steadysocial_chatbot_active_page';
 
 const normalizeText = (text: string) => text.trim().toLowerCase();
 
@@ -435,8 +446,9 @@ const buildAgentChatPrompt = (props: {
   userMessage: string;
   plan: AgentPlan;
   skillInstruction: string;
+  activePageName?: string | null;
 }) => {
-  const { userMessage, plan, skillInstruction } = props;
+  const { userMessage, plan, skillInstruction, activePageName } = props;
 
   return `
 You are SteadySocial Agent, an agentic marketing assistant inside the user's marketing operating system.
@@ -454,6 +466,9 @@ ${JSON.stringify(plan, null, 2)}
 
 Loaded skill instructions:
 ${skillInstruction || 'No specific skill instructions were loaded.'}
+
+Current Facebook page scope:
+${activePageName || 'No specific page selected. Use global scope.'}
 
 User request:
 ${userMessage}
@@ -473,6 +488,24 @@ export const ChatbotProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [chatbotError, setChatbotError] = useState<string | null>(null);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [pendingAgentPlan, setPendingAgentPlan] = useState<AgentPlan | null>(null);
+  const [activePageId, setActivePageId] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem(CHATBOT_ACTIVE_PAGE_STORAGE_KEY);
+      if (!saved) return null;
+      return JSON.parse(saved)?.pageId || null;
+    } catch {
+      return null;
+    }
+  });
+  const [activePageName, setActivePageName] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem(CHATBOT_ACTIVE_PAGE_STORAGE_KEY);
+      if (!saved) return null;
+      return JSON.parse(saved)?.pageName || null;
+    } catch {
+      return null;
+    }
+  });
 
   const {
     generateChatResponse,
@@ -484,14 +517,56 @@ export const ChatbotProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const { currentUser } = useAuth();
 
+  const setActivePage = useCallback((pageId: string | null, pageName?: string | null) => {
+    const cleanPageId = normalizeId(pageId) || null;
+    const cleanPageName = normalizeId(pageName) || null;
+    setActivePageId(cleanPageId);
+    setActivePageName(cleanPageName);
+
+    try {
+      if (cleanPageId) {
+        localStorage.setItem(CHATBOT_ACTIVE_PAGE_STORAGE_KEY, JSON.stringify({ pageId: cleanPageId, pageName: cleanPageName }));
+      } else {
+        localStorage.removeItem(CHATBOT_ACTIVE_PAGE_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.warn('Could not persist active chatbot page:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadDefaultPage = async () => {
+      if (activePageId) return;
+
+      try {
+        const settings = (await dbGetFacebookSettings()) as MultiPageFacebookSettings;
+        const pages = normalizeFacebookPages(settings);
+        const defaultPage = getDefaultFacebookPage(pages, settings);
+        if (defaultPage?.id) {
+          setActivePage(defaultPage.id, defaultPage.name);
+        }
+      } catch (error) {
+        console.warn('ChatbotContext: could not load default Facebook page.', error);
+      }
+    };
+
+    loadDefaultPage();
+  }, [activePageId, setActivePage]);
+
   const storageKey = useMemo(
-    () => currentUser ? `steadysocial_chat_history_${currentUser.id}` : 'steadysocial_chat_history',
-    [currentUser?.id]
+    () => {
+      const pageScope = activePageId || 'global';
+      return currentUser ? `steadysocial_chat_history_${currentUser.id}_${pageScope}` : `steadysocial_chat_history_${pageScope}`;
+    },
+    [currentUser?.id, activePageId]
   );
 
   const pendingStorageKey = useMemo(
-    () => currentUser ? `steadysocial_pending_agent_plan_${currentUser.id}` : 'steadysocial_pending_agent_plan',
-    [currentUser?.id]
+    () => {
+      const pageScope = activePageId || 'global';
+      return currentUser ? `steadysocial_pending_agent_plan_${currentUser.id}_${pageScope}` : `steadysocial_pending_agent_plan_${pageScope}`;
+    },
+    [currentUser?.id, activePageId]
   );
 
   const defaultMessages = useMemo<ChatMessage[]>(
@@ -705,6 +780,7 @@ Respond naturally. If they are changing details, update the proposed plan in pla
           userMessage: cleanText,
           plan,
           skillInstruction,
+          activePageName,
         });
 
         const finalContent = await generateChatResponse({
@@ -737,6 +813,7 @@ Respond naturally. If they are changing details, update the proposed plan in pla
       generateChatResponse,
       messages,
       pendingAgentPlan,
+      activePageName,
       updateAssistantMessage,
     ]
   );
@@ -753,6 +830,9 @@ Respond naturally. If they are changing details, update the proposed plan in pla
         clearError,
         pendingAgentPlan,
         cancelPendingAgentPlan,
+        activePageId,
+        activePageName,
+        setActivePage,
       }}
     >
       {children}

@@ -27,7 +27,9 @@ const DB_NAME = 'steady-social-chat-db';
 const CONVERSATION_STORE = 'conversation_statuses';
 const BUSINESS_DATA_STORE = 'business_data';
 const PRODUCT_DATA_STORE = 'product_data';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const DEFAULT_PAGE_DATA_ID = 'current';
+const PAGE_CONVERSATION_SEPARATOR = '::';
 
 class ChatDBService {
   private db: IDBDatabase | null = null;
@@ -42,8 +44,8 @@ class ChatDBService {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = () => {
-        console.error("IndexedDB error:", request.error);
-        reject(new Error("Failed to open IndexedDB."));
+        console.error('IndexedDB error:', request.error);
+        reject(new Error('Failed to open IndexedDB.'));
       };
 
       request.onsuccess = () => {
@@ -51,7 +53,7 @@ class ChatDBService {
         resolve();
       };
 
-      request.onupgradeneeded = (event) => {
+      request.onupgradeneeded = event => {
         const db = (event.target as IDBOpenDBRequest).result;
         if (!db.objectStoreNames.contains(CONVERSATION_STORE)) {
           db.createObjectStore(CONVERSATION_STORE, { keyPath: 'conversationId' });
@@ -66,169 +68,220 @@ class ChatDBService {
     });
   }
 
+  private getPageDataId(pageId?: string | null): string {
+    const normalized = String(pageId || '').trim();
+    return normalized || DEFAULT_PAGE_DATA_ID;
+  }
+
+  private getScopedConversationId(conversationId: string, pageId?: string | null): string {
+    const cleanConversationId = String(conversationId || '').trim();
+    const cleanPageId = String(pageId || '').trim();
+
+    if (!cleanPageId || cleanConversationId.includes(PAGE_CONVERSATION_SEPARATOR)) {
+      return cleanConversationId;
+    }
+
+    return `${cleanPageId}${PAGE_CONVERSATION_SEPARATOR}${cleanConversationId}`;
+  }
+
+  private stripScopedConversationId(scopedConversationId: string, pageId?: string | null): string {
+    const cleanPageId = String(pageId || '').trim();
+    const prefix = cleanPageId ? `${cleanPageId}${PAGE_CONVERSATION_SEPARATOR}` : '';
+
+    if (prefix && scopedConversationId.startsWith(prefix)) {
+      return scopedConversationId.slice(prefix.length);
+    }
+
+    const separatorIndex = scopedConversationId.indexOf(PAGE_CONVERSATION_SEPARATOR);
+    if (!cleanPageId && separatorIndex >= 0) {
+      return scopedConversationId.slice(separatorIndex + PAGE_CONVERSATION_SEPARATOR.length);
+    }
+
+    return scopedConversationId;
+  }
+
+  private getDefaultState(): ConversationState {
+    return {
+      status: 'none',
+      isAiDisabled: 'disabled',
+      isImportant: false,
+      remarks: '',
+      customerStatus: 'New',
+      orderHistory: [],
+      customerDetails: {},
+      tags: [],
+      sentiment: undefined,
+      autopilotMode: 'continuous',
+      followUpTone: 'warm',
+    };
+  }
+
+  private normalizeState(stateFromDb: any = {}): ConversationState {
+    const { conversationId: _convId, pageId: _pageId, rawConversationId: _rawConversationId, ...cleanState } = stateFromDb || {};
+
+    return {
+      ...this.getDefaultState(),
+      ...cleanState,
+    };
+  }
+
   private async getAndUpdateState(
     conversationId: string,
-    updateFn: (state: ConversationState) => Partial<ConversationState>
+    updateFn: (state: ConversationState) => Partial<ConversationState>,
+    pageId?: string | null
   ): Promise<void> {
     if (!this.db) await this.init();
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(CONVERSATION_STORE, 'readwrite');
       const store = transaction.objectStore(CONVERSATION_STORE);
-      const getRequest = store.get(conversationId);
+      const scopedConversationId = this.getScopedConversationId(conversationId, pageId);
+      const cleanPageId = String(pageId || '').trim();
 
-      getRequest.onsuccess = () => {
-        const defaultState: ConversationState = {
-          status: 'none',
-          isAiDisabled: 'disabled',
-          isImportant: false,
-          remarks: '',
-          customerStatus: 'New',
-          orderHistory: [],
-          customerDetails: {},
-          tags: [],
-          sentiment: undefined,
-          autopilotMode: 'continuous',
-          followUpTone: 'warm',
-        };
-
-        const existingState = getRequest.result || {};
-        const { conversationId: _convId, ...stateFromDb } = existingState;
-
-        const currentState: ConversationState = {
-          ...defaultState,
-          ...stateFromDb,
-        };
-
+      const writeState = (existingState: any = {}) => {
+        const currentState = this.normalizeState(existingState);
         const updates = updateFn(currentState);
         const newState = { ...currentState, ...updates };
 
-        const putRequest = store.put({ conversationId, ...newState });
+        const putRequest = store.put({
+          conversationId: scopedConversationId,
+          rawConversationId: conversationId,
+          pageId: cleanPageId || undefined,
+          ...newState,
+        });
 
         putRequest.onsuccess = () => resolve();
-        putRequest.onerror = (e) => {
-          console.error("Failed to update state:", (e.target as any).error);
-          reject(new Error("Could not save state to the database."));
+        putRequest.onerror = e => {
+          console.error('Failed to update state:', (e.target as any).error);
+          reject(new Error('Could not save state to the database.'));
         };
       };
-      getRequest.onerror = (e) => {
-        console.error("Failed to get conversation state for update:", (e.target as any).error);
-        reject(new Error("Could not read conversation state."));
+
+      const getRequest = store.get(scopedConversationId);
+
+      getRequest.onsuccess = () => {
+        if (getRequest.result || !cleanPageId) {
+          writeState(getRequest.result || {});
+          return;
+        }
+
+        // Backward compatibility: seed a page-scoped state from the legacy unscoped row.
+        const legacyRequest = store.get(conversationId);
+        legacyRequest.onsuccess = () => writeState(legacyRequest.result || {});
+        legacyRequest.onerror = () => writeState({});
+      };
+
+      getRequest.onerror = e => {
+        console.error('Failed to get conversation state for update:', (e.target as any).error);
+        reject(new Error('Could not read conversation state.'));
       };
     });
   }
 
-  public async setStatus(conversationId: string, status: ConversationStatus): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ status }));
+  public async setStatus(conversationId: string, status: ConversationStatus, pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ status }), pageId);
   }
 
-  public async toggleAi(conversationId: string, aiState: 'enabled' | 'disabled'): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ isAiDisabled: aiState }));
+  public async toggleAi(conversationId: string, aiState: 'enabled' | 'disabled', pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ isAiDisabled: aiState }), pageId);
   }
 
-  public async toggleImportant(conversationId: string, isImportant: boolean): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ isImportant }));
+  public async toggleImportant(conversationId: string, isImportant: boolean, pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ isImportant }), pageId);
   }
 
-  public async saveRemarks(conversationId: string, remarks: string): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ remarks }));
+  public async saveRemarks(conversationId: string, remarks: string, pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ remarks }), pageId);
   }
 
-  public async saveCustomerStatus(conversationId: string, customerStatus: CustomerStatus): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ customerStatus }));
+  public async saveCustomerStatus(conversationId: string, customerStatus: CustomerStatus, pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ customerStatus }), pageId);
   }
 
-  public async saveCustomerDetails(conversationId: string, details: CustomerDetails): Promise<void> {
-    await this.getAndUpdateState(conversationId, (state) => ({
-      customerDetails: { ...(state.customerDetails || {}), ...details }
-    }));
+  public async saveCustomerDetails(conversationId: string, details: CustomerDetails, pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(
+      conversationId,
+      state => ({ customerDetails: { ...(state.customerDetails || {}), ...details } }),
+      pageId
+    );
   }
 
-  public async saveTags(conversationId: string, tags: string[]): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ tags }));
+  public async saveTags(conversationId: string, tags: string[], pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ tags }), pageId);
   }
 
-  public async saveSentiment(conversationId: string, sentiment: Sentiment | undefined): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ sentiment }));
+  public async saveSentiment(conversationId: string, sentiment: Sentiment | undefined, pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ sentiment }), pageId);
   }
 
-  public async saveAutopilotMode(conversationId: string, autopilotMode: 'continuous' | 'single_shot' | 'follow_up'): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ autopilotMode }));
+  public async saveAutopilotMode(conversationId: string, autopilotMode: 'continuous' | 'single_shot' | 'follow_up', pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ autopilotMode }), pageId);
   }
 
-  public async saveFollowUpTone(conversationId: string, followUpTone: string): Promise<void> {
-    await this.getAndUpdateState(conversationId, () => ({ followUpTone }));
+  public async saveFollowUpTone(conversationId: string, followUpTone: string, pageId?: string | null): Promise<void> {
+    await this.getAndUpdateState(conversationId, () => ({ followUpTone }), pageId);
   }
 
-  public async getConversationState(conversationId: string): Promise<ConversationState> {
+  public async getConversationState(conversationId: string, pageId?: string | null): Promise<ConversationState> {
     if (!this.db) await this.init();
-    return new Promise((resolve) => {
+
+    return new Promise(resolve => {
       const transaction = this.db!.transaction(CONVERSATION_STORE, 'readonly');
       const store = transaction.objectStore(CONVERSATION_STORE);
-      const request = store.get(conversationId);
+      const scopedConversationId = this.getScopedConversationId(conversationId, pageId);
+      const cleanPageId = String(pageId || '').trim();
 
-      request.onsuccess = () => {
-        const result = request.result;
-        resolve({
-          status: result?.status || 'none',
-          isAiDisabled: result?.isAiDisabled || 'disabled',
-          isImportant: result?.isImportant || false,
-          remarks: result?.remarks || '',
-          customerStatus: result?.customerStatus || 'New',
-          orderHistory: result?.orderHistory || [],
-          customerDetails: result?.customerDetails || {},
-          tags: result?.tags || [],
-          sentiment: result?.sentiment,
-          autopilotMode: result?.autopilotMode || 'continuous',
-          followUpTone: result?.followUpTone || 'warm',
-        });
+      const readScoped = store.get(scopedConversationId);
+
+      readScoped.onsuccess = () => {
+        if (readScoped.result || !cleanPageId) {
+          resolve(this.normalizeState(readScoped.result));
+          return;
+        }
+
+        const readLegacy = store.get(conversationId);
+        readLegacy.onsuccess = () => resolve(this.normalizeState(readLegacy.result));
+        readLegacy.onerror = () => resolve(this.getDefaultState());
       };
-      request.onerror = () => {
-        console.error("Failed to get state:", request.error);
-        resolve({
-          status: 'none',
-          isAiDisabled: 'disabled',
-          isImportant: false,
-          remarks: '',
-          customerStatus: 'New',
-          orderHistory: [],
-          customerDetails: {},
-          tags: [],
-          sentiment: undefined
-        });
+
+      readScoped.onerror = () => {
+        console.error('Failed to get state:', readScoped.error);
+        resolve(this.getDefaultState());
       };
     });
   }
 
-  public async getAllConversationStates(): Promise<Record<string, ConversationState>> {
+  public async getAllConversationStates(pageId?: string | null): Promise<Record<string, ConversationState>> {
     if (!this.db) await this.init();
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(CONVERSATION_STORE, 'readonly');
       const store = transaction.objectStore(CONVERSATION_STORE);
       const request = store.getAll();
+      const cleanPageId = String(pageId || '').trim();
 
       request.onsuccess = () => {
         const states: Record<string, ConversationState> = {};
+
         request.result.forEach(item => {
-          states[item.conversationId] = {
-            status: item.status || 'none',
-            isAiDisabled: item.isAiDisabled || 'disabled',
-            isImportant: item.isImportant || false,
-            remarks: item.remarks || '',
-            customerStatus: item.customerStatus || 'New',
-            orderHistory: item.orderHistory || [],
-            customerDetails: item.customerDetails || {},
-            tags: item.tags || [],
-            sentiment: item.sentiment,
-            autopilotMode: item.autopilotMode || 'continuous',
-            followUpTone: item.followUpTone || 'warm',
-          };
+          const conversationId = String(item.conversationId || '');
+          const itemPageId = String(item.pageId || '').trim();
+          const belongsToPage = cleanPageId
+            ? itemPageId === cleanPageId || conversationId.startsWith(`${cleanPageId}${PAGE_CONVERSATION_SEPARATOR}`)
+            : true;
+
+          if (!belongsToPage) return;
+
+          const rawConversationId = item.rawConversationId || this.stripScopedConversationId(conversationId, cleanPageId);
+          states[rawConversationId] = this.normalizeState(item);
         });
+
         resolve(states);
       };
 
       request.onerror = () => {
-        console.error("Failed to get all states:", request.error);
-        reject(new Error("Could not retrieve states from the database."));
+        console.error('Failed to get all states:', request.error);
+        reject(new Error('Could not retrieve states from the database.'));
       };
     });
   }
@@ -244,7 +297,7 @@ class ChatDBService {
       const request = operation(store);
 
       request.onsuccess = () => resolve();
-      request.onerror = (e) => {
+      request.onerror = e => {
         console.error(`Failed to write to ${storeName}:`, (e.target as any).error);
         reject(new Error(`Could not write to store ${storeName}.`));
       };
@@ -262,39 +315,54 @@ class ChatDBService {
       const request = operation(store);
 
       request.onsuccess = () => resolve(request.result);
-      request.onerror = (e) => {
+      request.onerror = e => {
         console.error(`Failed to read from ${storeName}:`, (e.target as any).error);
         reject(new Error(`Could not read from store ${storeName}.`));
       };
     });
   }
 
-  public async saveBusinessData(data: any): Promise<void> {
+  private async getPageScopedData(storeName: string, pageId?: string | null): Promise<any | null> {
+    const pageDataId = this.getPageDataId(pageId);
+    const pageResult = await this.performReadTransaction<{ id: string; data: any }>(
+      storeName,
+      store => store.get(pageDataId)
+    ).catch(() => null);
+
+    if (pageResult?.data) return pageResult.data;
+
+    if (pageDataId !== DEFAULT_PAGE_DATA_ID) {
+      const fallbackResult = await this.performReadTransaction<{ id: string; data: any }>(
+        storeName,
+        store => store.get(DEFAULT_PAGE_DATA_ID)
+      ).catch(() => null);
+
+      return fallbackResult?.data || null;
+    }
+
+    return null;
+  }
+
+  public async saveBusinessData(data: any, pageId?: string | null): Promise<void> {
+    const id = this.getPageDataId(pageId);
     return this.performWriteTransaction(BUSINESS_DATA_STORE, store =>
-      store.put({ id: 'current', data })
+      store.put({ id, pageId: id === DEFAULT_PAGE_DATA_ID ? undefined : id, data })
     );
   }
 
-  public async getBusinessData(): Promise<any | null> {
-    const result = await this.performReadTransaction<{ id: string, data: any }>(
-      BUSINESS_DATA_STORE,
-      store => store.get('current')
-    ).catch(() => null);
-    return result?.data || null;
+  public async getBusinessData(pageId?: string | null): Promise<any | null> {
+    return this.getPageScopedData(BUSINESS_DATA_STORE, pageId);
   }
 
-  public async saveProductData(data: any): Promise<void> {
+  public async saveProductData(data: any, pageId?: string | null): Promise<void> {
+    const id = this.getPageDataId(pageId);
     return this.performWriteTransaction(PRODUCT_DATA_STORE, store =>
-      store.put({ id: 'current', data })
+      store.put({ id, pageId: id === DEFAULT_PAGE_DATA_ID ? undefined : id, data })
     );
   }
 
-  public async getProductData(): Promise<any | null> {
-    const result = await this.performReadTransaction<{ id: string, data: any }>(
-      PRODUCT_DATA_STORE,
-      store => store.get('current')
-    ).catch(() => null);
-    return result?.data || null;
+  public async getProductData(pageId?: string | null): Promise<any | null> {
+    return this.getPageScopedData(PRODUCT_DATA_STORE, pageId);
   }
 }
 

@@ -16,6 +16,13 @@ import {
 } from '../types';
 
 import { dbGetFacebookSettings } from '../services/settingsService';
+import {
+  ConfiguredFacebookPage,
+  MultiPageFacebookSettings,
+  getDefaultFacebookPage,
+  getFacebookPageAccessToken,
+  normalizeFacebookPages,
+} from '../utils/facebookPageUtils';
 
 type FBAPIFunction = <T>(
   path: string,
@@ -31,15 +38,30 @@ interface KpiDataType {
   newFollowers: number | null;
 }
 
+type AnalyticsPageTarget = Partial<ConfiguredFacebookPage> & {
+  id?: string;
+  pageId?: string;
+  name?: string;
+  pageName?: string;
+  access_token?: string;
+  accessToken?: string;
+};
+
 interface AnalyticsContextType {
   fbPageInfo: FBPageInfo | null;
   kpiData: KpiDataType;
   engagementOverTime: FBInsightValue[];
   topPosts: FBPost[];
   pageAccessToken: string | null;
+  activeAnalyticsPage: AnalyticsPageTarget | null;
+  setAnalyticsPage: (page: AnalyticsPageTarget | null) => void;
   isLoadingAnalytics: boolean;
   analyticsError: string | null;
-  loadAnalytics: (fbApi: FBAPIFunction, forceRefresh?: boolean) => Promise<void>;
+  loadAnalytics: (
+    fbApi: FBAPIFunction,
+    forceRefresh?: boolean,
+    pageOverride?: AnalyticsPageTarget | null
+  ) => Promise<void>;
   lastFetchedPageId: string | null;
   isLoadingFbSettings: boolean;
 }
@@ -56,9 +78,20 @@ const EMPTY_KPI: KpiDataType = {
   newFollowers: null,
 };
 
+const normalizeId = (value?: string | null): string => String(value || '').trim();
+
+const getTargetPageId = (page?: AnalyticsPageTarget | null): string => {
+  return normalizeId(page?.id || page?.pageId || '');
+};
+
+const getTargetPageName = (page?: AnalyticsPageTarget | null): string => {
+  return normalizeId(page?.name || page?.pageName || '');
+};
+
 const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [fbPageInfo, setFbPageInfo] = useState<FBPageInfo | null>(null);
   const [pageAccessToken, setPageAccessToken] = useState<string | null>(null);
+  const [activeAnalyticsPage, setActiveAnalyticsPage] = useState<AnalyticsPageTarget | null>(null);
 
   const [kpiData, setKpiData] = useState<KpiDataType>(EMPTY_KPI);
   const [engagementOverTime, setEngagementOverTime] = useState<FBInsightValue[]>(
@@ -72,7 +105,7 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     null
   );
 
-  const [fbSettings, setFbSettings] = useState<FacebookSettings | null>(null);
+  const [fbSettings, setFbSettings] = useState<MultiPageFacebookSettings | null>(null);
   const [isLoadingFbSettings, setIsLoadingFbSettings] = useState(true);
 
   useEffect(() => {
@@ -80,8 +113,12 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       setIsLoadingFbSettings(true);
 
       try {
-        const settings = await dbGetFacebookSettings();
+        const settings = (await dbGetFacebookSettings()) as MultiPageFacebookSettings;
+        const pages = normalizeFacebookPages(settings);
+        const defaultPage = getDefaultFacebookPage(pages, settings);
+
         setFbSettings(settings);
+        setActiveAnalyticsPage(prev => prev || defaultPage || null);
       } catch (err) {
         console.error(
           'AnalyticsContext: Failed to fetch Facebook settings',
@@ -105,6 +142,37 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     setTopPosts([]);
     setPageAccessToken(null);
   }, []);
+
+  const setAnalyticsPage = useCallback((page: AnalyticsPageTarget | null) => {
+    setActiveAnalyticsPage(page);
+    setLastFetchedPageId(null);
+    resetAnalyticsState();
+  }, [resetAnalyticsState]);
+
+  const resolveTargetPage = useCallback((pageOverride?: AnalyticsPageTarget | null) => {
+    const configuredPages = normalizeFacebookPages(fbSettings);
+    const fallbackPage = getDefaultFacebookPage(configuredPages, fbSettings);
+    const target = pageOverride || activeAnalyticsPage || fallbackPage;
+
+    const pageId =
+      getTargetPageId(target) ||
+      normalizeId(fbSettings?.pageId || '');
+
+    const accessToken =
+      getFacebookPageAccessToken(target as ConfiguredFacebookPage) ||
+      normalizeId(fbSettings?.accessToken || '');
+
+    const pageName =
+      getTargetPageName(target) ||
+      normalizeId(fbSettings?.pageName || '');
+
+    return {
+      pageId,
+      accessToken,
+      pageName,
+      page: target || null,
+    };
+  }, [activeAnalyticsPage, fbSettings]);
 
   const getPostEngagement = (post: any): number => {
     const reactions = post?.reactions?.summary?.total_count || 0;
@@ -139,21 +207,22 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   const loadAnalytics = useCallback(
-    async (fbApi: FBAPIFunction, forceRefresh: boolean = false) => {
-      if (isLoadingFbSettings) return;
+    async (
+      fbApi: FBAPIFunction,
+      forceRefresh: boolean = false,
+      pageOverride?: AnalyticsPageTarget | null
+    ) => {
+      if (isLoadingFbSettings && !pageOverride && !activeAnalyticsPage) return;
 
-      if (!fbSettings) {
-        setAnalyticsError('Facebook settings not available for analytics.');
-        return;
-      }
+      const { pageId, accessToken, page } = resolveTargetPage(pageOverride);
 
-      if (!fbSettings.pageId) {
+      if (!pageId) {
         setAnalyticsError('Facebook Page ID not configured in settings.');
         resetAnalyticsState();
         return;
       }
 
-      if (!fbSettings.accessToken) {
+      if (!accessToken) {
         setAnalyticsError(
           'Page Access Token not found. Please configure it in Settings.'
         );
@@ -163,7 +232,7 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
       if (
         !forceRefresh &&
-        lastFetchedPageId === fbSettings.pageId &&
+        lastFetchedPageId === pageId &&
         fbPageInfo
       ) {
         return;
@@ -172,15 +241,13 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       setIsLoadingAnalytics(true);
       setAnalyticsError(null);
 
-      const pageId = fbSettings.pageId;
-      const currentToken = fbSettings.accessToken;
-
       const thirtyDaysAgo = Math.floor(
         (Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000
       );
 
       try {
-        setPageAccessToken(currentToken);
+        setActiveAnalyticsPage(page || pageOverride || null);
+        setPageAccessToken(accessToken);
         setLastFetchedPageId(pageId);
 
         const pageInfoPromise = fbApi<FBPageInfo>(`/${pageId}`, 'get', {
@@ -191,7 +258,7 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             'followers_count',
             'picture.type(large)',
           ].join(','),
-          access_token: currentToken,
+          access_token: accessToken,
         });
 
         const postsPromise = fbApi<FBPostsResponse>(
@@ -210,7 +277,7 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             ].join(','),
             limit: 100,
             since: thirtyDaysAgo,
-            access_token: currentToken,
+            access_token: accessToken,
           }
         ).catch((err) => {
           console.warn('Posts analytics request failed:', err);
@@ -259,10 +326,11 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       }
     },
     [
-      fbSettings,
+      activeAnalyticsPage,
       fbPageInfo,
       lastFetchedPageId,
       isLoadingFbSettings,
+      resolveTargetPage,
       resetAnalyticsState,
     ]
   );
@@ -273,6 +341,8 @@ const AnalyticsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     engagementOverTime,
     topPosts,
     pageAccessToken,
+    activeAnalyticsPage,
+    setAnalyticsPage,
     isLoadingAnalytics,
     analyticsError,
     loadAnalytics,

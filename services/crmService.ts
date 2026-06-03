@@ -31,6 +31,8 @@ export interface Lead {
     value?: string;
     notes?: string;
     messengerConversationId?: string;
+    facebookPageId?: string;
+    facebookPageName?: string;
     fbLeadId?: string;
     fbFormId?: string;
     fbAdId?: string;
