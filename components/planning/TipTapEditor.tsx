@@ -222,7 +222,9 @@ const TipTapEditor: React.FC<TipTapEditorProps> = ({
     onUpdate({ editor }) {
       if (onChange) {
         const md = (editor.storage as any).markdown?.getMarkdown?.() ?? '';
-        onChange(md);
+        // Defer to avoid "Cannot update a component while rendering a different component"
+        // TipTap's onUpdate can fire synchronously during content initialization.
+        setTimeout(() => onChange(md), 0);
       }
     },
   });

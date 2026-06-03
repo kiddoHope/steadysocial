@@ -871,18 +871,18 @@ const PlanningPage: React.FC = () => {
         {/* Right Side: Interactive Preview / Content Workspace Panel */}
         <div className={`flex-1 flex flex-col min-w-0 ${isFullscreen ? 'z-50' : ''}`}>
           {activeFile ? (
-            <Card className={`bg-white border-4 border-neo-black flex flex-col ${
-              isFullscreen 
-                ? 'fixed inset-4 z-50 neo-shadow-2xl' 
+            <div className={`bg-white neo-border neo-shadow-md transition-all duration-200 flex flex-col ${
+              isFullscreen
+                ? 'fixed inset-4 z-50 neo-shadow-2xl overflow-hidden'
                 : 'neo-shadow-md flex-1'
             }`}>
               {/* Workspace Header */}
-              <div className="flex justify-between items-center bg-neo-black text-white p-4 border-b-4 border-neo-black flex-shrink-0">
+              <div className="flex justify-between items-center bg-neo-black text-white p-4 border-b-4 border-neo-black flex-shrink-0 flex-wrap gap-2">
                 <div className="min-w-0 pr-4">
                   <span className="text-[8px] font-black uppercase tracking-[0.2em] opacity-60">WORKSPACE // PLAN_VIEWER</span>
                   <h2 className="font-black uppercase text-sm truncate">{activeFile.name}</h2>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button
                     variant="primary"
                     size="sm"
@@ -949,10 +949,10 @@ const PlanningPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Workspace body */}
+              {/* Workspace body — direct flex child, so flex-1 actually works */}
               <div className={`flex-1 min-h-0 overflow-y-auto p-6 relative ${
-                isFullscreen 
-                  ? 'h-full max-h-none' 
+                isFullscreen
+                  ? ''
                   : 'min-h-[500px] max-h-[80vh]'
               }`}>
                 {isLoadingContent ? (
@@ -965,7 +965,7 @@ const PlanningPage: React.FC = () => {
                   <>
                     {/* ── TIPTAP for .md files (read + edit unified) ── */}
                     {activeFileContent.fileType === 'md' && (
-                      <div className="h-full flex flex-col gap-0">
+                      <div className="flex flex-col gap-0 min-h-0">
                         <TipTapEditor
                           content={activeFileContent.content || ''}
                           editable={isEditing}
@@ -1151,7 +1151,7 @@ const PlanningPage: React.FC = () => {
                   </div>
                 )}
               </div>
-            </Card>
+            </div>
           ) : (
             /* Selected File Placeholder Card */
             <div className="bg-neo-secondary/10 border-4 border-dashed border-neo-black p-12 text-center neo-shadow-sm flex flex-col justify-center items-center flex-grow min-h-[500px]">
