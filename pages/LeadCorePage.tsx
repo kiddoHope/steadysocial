@@ -48,6 +48,20 @@ const LeadCorePage: React.FC = () => {
   const [isLoadingForms, setIsLoadingForms] = useState(false);
   const [inspectingLead, setInspectingLead] = useState<Lead | null>(null);
 
+  // Edit Lead Form State
+  const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editAge, setEditAge] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editSource, setEditSource] = useState<LeadSource>('MANUAL');
+  const [editStatus, setEditStatus] = useState<LeadStatus>('NEW');
+
+  // Selection state
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     fetchLeads();
     // loadFacebookSettings();
@@ -58,6 +72,7 @@ const LeadCorePage: React.FC = () => {
     try {
       const data = await dbGetLeads();
       setLeads(data);
+      setSelectedLeadIds(new Set());
     } catch (err: any) {
       setError(`FETCH_ERROR: ${err.message}`);
     } finally {
@@ -127,6 +142,119 @@ const LeadCorePage: React.FC = () => {
     } catch (err: any) {
       setError(`CREATE_ERROR: ${err.message}`);
     }
+  };
+
+  const handleEditClick = (lead: Lead) => {
+    setEditingLead(lead);
+    setEditName(lead.name);
+    setEditEmail(lead.email || '');
+    setEditPhone(lead.phone || '');
+    setEditAddress(lead.address || '');
+    setEditAge(lead.age ? String(lead.age) : '');
+    setEditGender(lead.gender || '');
+    setEditSource(lead.source);
+    setEditStatus(lead.status);
+  };
+
+  const handleUpdateLead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLead) return;
+    try {
+      await dbUpdateLead(editingLead.id, {
+        name: editName,
+        email: editEmail || undefined,
+        phone: editPhone || undefined,
+        address: editAddress || undefined,
+        age: editAge ? parseInt(editAge) || undefined : undefined,
+        gender: editGender || undefined,
+        source: editSource,
+        status: editStatus
+      });
+      setEditingLead(null);
+      fetchLeads();
+      setSuccessMsg('Lead updated successfully!');
+      if (inspectingLead?.id === editingLead.id) {
+        setInspectingLead({
+          ...inspectingLead,
+          name: editName,
+          email: editEmail || undefined,
+          phone: editPhone || undefined,
+          address: editAddress || undefined,
+          age: editAge ? parseInt(editAge) || undefined : undefined,
+          gender: editGender || undefined,
+          source: editSource,
+          status: editStatus
+        });
+      }
+    } catch (err: any) {
+      setError(`UPDATE_ERROR: ${err.message}`);
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedLeadIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    setSelectedLeadIds(prev => {
+      if (prev.size === leads.length) {
+        return new Set();
+      } else {
+        return new Set(leads.map(l => l.id));
+      }
+    });
+  };
+
+  const exportToExcel = async (exportLeads: Lead[], fileName: string) => {
+    try {
+      const { default: XLSX } = await import('xlsx');
+      const dataToExport = exportLeads.map(lead => ({
+        ID: lead.id,
+        Name: lead.name,
+        Status: lead.status,
+        Source: lead.source,
+        Email: lead.email || '',
+        Phone: lead.phone || '',
+        Age: lead.age || '',
+        Gender: lead.gender || '',
+        Address: lead.address || '',
+        'FB Lead ID': lead.fbLeadId || '',
+        'FB Submitted At': lead.fbSubmittedAt ? new Date(lead.fbSubmittedAt).toLocaleString() : ''
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads');
+      XLSX.writeFile(workbook, `${fileName}.xlsx`);
+      setSuccessMsg(`Successfully exported ${exportLeads.length} leads to ${fileName}.xlsx!`);
+    } catch (err: any) {
+      setError(`EXPORT_ERROR: ${err.message}`);
+    }
+  };
+
+  const handleExportSelected = () => {
+    const selectedLeads = leads.filter(l => selectedLeadIds.has(l.id));
+    if (selectedLeads.length === 0) {
+      setError('No leads selected for export.');
+      return;
+    }
+    exportToExcel(selectedLeads, 'selected_leads');
+  };
+
+  const handleExportAll = () => {
+    if (leads.length === 0) {
+      setError('No leads to export.');
+      return;
+    }
+    exportToExcel(leads, 'all_leads');
   };
 
   // Bulk Import Parser (CSV/Excel)
@@ -264,10 +392,18 @@ const LeadCorePage: React.FC = () => {
           <h1 className="text-5xl md:text-7xl font-black uppercase tracking-tighter text-neo-black leading-none">
             LEAD_<span className="text-neo-secondary outline-text">CORE</span>
           </h1>
-          <div className="flex gap-4">
+          <div className="flex gap-3 flex-wrap">
             <Button variant="secondary" onClick={() => { fetchLeads(); }}>
               REFRESH_ALL
             </Button>
+            <Button variant="secondary" className="bg-neo-muted text-neo-black border-2 border-neo-black" onClick={handleExportAll}>
+              <i className="fas fa-file-export mr-2"></i> EXPORT_ALL
+            </Button>
+            {selectedLeadIds.size > 0 && (
+              <Button variant="secondary" className="bg-neo-secondary text-neo-black border-2 border-neo-black" onClick={handleExportSelected}>
+                <i className="fas fa-check-double mr-2"></i> EXPORT_SELECTED ({selectedLeadIds.size})
+              </Button>
+            )}
             <Button variant="primary" onClick={() => { setIsAddingLead(true); resetForm(); setImportTab('manual'); }}>
               ADD_NEW_LEAD
             </Button>
@@ -276,9 +412,88 @@ const LeadCorePage: React.FC = () => {
       </header>
 
       <main className="relative z-10 max-w-[1400px] w-full mx-auto flex-grow grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-3 space-y-6">
+        <div className={`${inspectingLead ? 'lg:col-span-2' : 'lg:col-span-3'} space-y-6`}>
           {error && <Alert type="error" message={error} onClose={() => setError(null)} className="mb-4" />}
           {successMsg && <Alert type="success" message={successMsg} onClose={() => setSuccessMsg(null)} className="mb-4" />}
+
+          {editingLead && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white border-4 border-neo-black p-6 w-full max-w-2xl neo-shadow-lg relative overflow-y-auto max-h-[90vh]">
+                <button 
+                  onClick={() => setEditingLead(null)} 
+                  className="absolute top-4 right-4 text-2xl font-black hover:text-neo-accent"
+                >
+                  ✕
+                </button>
+                
+                <h3 className="text-3xl font-black uppercase mb-6 tracking-tight">EDIT_LEAD</h3>
+
+                <form onSubmit={handleUpdateLead} className="space-y-4">
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <Input label="FULL_NAME" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Full Name" required />
+                    <Input label="EMAIL_ADDRESS" value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email Address" />
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <Input label="CONTACT_NUMBER" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="Contact / Phone" />
+                    <Input label="AGE" type="number" value={editAge} onChange={e => setEditAge(e.target.value)} placeholder="Age" />
+                    <Select 
+                      label="GENDER" 
+                      value={editGender} 
+                      onChange={e => setEditGender(e.target.value)}
+                      options={[
+                        { value: '', label: 'SELECT GENDER' },
+                        { value: 'Male', label: 'Male' },
+                        { value: 'Female', label: 'Female' },
+                        { value: 'Non-binary', label: 'Non-binary' },
+                        { value: 'Prefer not to say', label: 'Prefer not to say' }
+                      ]}
+                    />
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <Select 
+                      label="SOURCE" 
+                      value={editSource} 
+                      onChange={e => setEditSource(e.target.value as LeadSource)}
+                      options={[
+                        { value: 'MANUAL', label: 'MANUAL' },
+                        { value: 'MESSENGER', label: 'MESSENGER' },
+                        { value: 'FACEBOOK_ADS', label: 'FACEBOOK_ADS' },
+                        { value: 'INSTAGRAM', label: 'INSTAGRAM' },
+                        { value: 'WEBSITE', label: 'WEBSITE' },
+                        { value: 'REFERRAL', label: 'REFERRAL' },
+                        { value: 'OTHER', label: 'OTHER' }
+                      ]}
+                    />
+                    <Select 
+                      label="STATUS" 
+                      value={editStatus} 
+                      onChange={e => setEditStatus(e.target.value as LeadStatus)}
+                      options={[
+                        { value: 'NEW', label: 'NEW' },
+                        { value: 'CONTACTED', label: 'CONTACTED' },
+                        { value: 'QUALIFIED', label: 'QUALIFIED' },
+                        { value: 'WON', label: 'WON' },
+                        { value: 'LOST', label: 'LOST' }
+                      ]}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-black tracking-wider text-neo-black mb-1.5">ADDRESS</label>
+                    <textarea
+                      value={editAddress}
+                      onChange={e => setEditAddress(e.target.value)}
+                      placeholder="Complete Mailing Address"
+                      className="w-full text-xs font-bold p-3 neo-border-sm bg-neo-bg focus:bg-white focus:outline-none min-h-[80px]"
+                    />
+                  </div>
+                  <div className="flex gap-4 pt-4">
+                    <Button type="button" variant="secondary" onClick={() => setEditingLead(null)} className="w-1/3">CANCEL</Button>
+                    <Button type="submit" variant="primary" className="w-2/3">UPDATE_LEAD_DATA</Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           {isAddingLead && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -434,6 +649,14 @@ const LeadCorePage: React.FC = () => {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-neo-black text-white font-black uppercase text-xs tracking-widest border-b-4 border-neo-black">
+                      <th className="p-4 w-12 text-center">
+                        <input 
+                          type="checkbox" 
+                          checked={leads.length > 0 && selectedLeadIds.size === leads.length}
+                          onChange={handleToggleSelectAll}
+                          className="cursor-pointer border-2 border-neo-black accent-neo-accent"
+                        />
+                      </th>
                       <th className="p-4">IDENTIFIER</th>
                       <th className="p-4">STATUS</th>
                       <th className="p-4">DEMOGRAPHICS</th>
@@ -444,7 +667,15 @@ const LeadCorePage: React.FC = () => {
                   </thead>
                   <tbody>
                     {leads.map(lead => (
-                      <tr key={lead.id} className="border-b border-neo-black hover:bg-neo-muted transition-colors">
+                      <tr key={lead.id} className={`border-b border-neo-black hover:bg-neo-muted transition-colors ${selectedLeadIds.has(lead.id) ? 'bg-neo-secondary/10' : ''}`}>
+                        <td className="p-4 text-center">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedLeadIds.has(lead.id)}
+                            onChange={() => handleToggleSelect(lead.id)}
+                            className="cursor-pointer border-2 border-neo-black accent-neo-accent"
+                          />
+                        </td>
                         <td className="p-4 font-black uppercase text-sm flex flex-col">
                           <span>{lead.name}</span>
                           <span className={`text-[9px] font-black px-2 py-0.5 mt-1 neo-border-sm border border-neo-black uppercase w-max ${
@@ -484,11 +715,21 @@ const LeadCorePage: React.FC = () => {
                           {lead.address || <span className="opacity-40 italic">NO_ADDRESS</span>}
                         </td>
                         <td className="p-4 text-right space-x-3">
-                          <button 
-                            onClick={() => setInspectingLead(lead)} 
+                          <button
+                            onClick={() => {
+                              if (lead) {
+                                setInspectingLead(lead);
+                              }
+                            }}
                             className="text-xs font-black uppercase border border-neo-black bg-neo-muted px-2 py-1 neo-shadow-sm hover:-translate-y-0.5 transition-transform"
                           >
                             INSPECT
+                          </button>
+                          <button
+                            onClick={() => handleEditClick(lead)}
+                            className="text-xs font-black uppercase border border-neo-black bg-neo-secondary px-2 py-1 neo-shadow-sm hover:-translate-y-0.5 transition-transform"
+                          >
+                            EDIT
                           </button>
                           <button onClick={() => handleDeleteLead(lead.id)} className="text-neo-accent hover:text-neo-black transition-colors font-black text-sm">
                             ✖
@@ -613,6 +854,109 @@ const LeadCorePage: React.FC = () => {
             </Card>
           )}
         </div> */}
+        
+        {inspectingLead && (
+          <div className="space-y-6">
+            <Card title="LEAD DATA INSPECTION" className="neo-shadow-md bg-white border-2 border-neo-black relative">
+              <button 
+                onClick={() => setInspectingLead(null)} 
+                className="absolute top-3 right-3 text-neo-black hover:text-neo-accent font-black text-sm"
+              >
+                ✕
+              </button>
+              <div className="space-y-3 font-bold text-xs mt-2">
+                <div className="flex justify-between items-center border-b-2 border-neo-black pb-1 mb-2">
+                  <span className="text-[10px] uppercase text-neo-accent font-black">Lead Profile</span>
+                  <span className="text-[10px] uppercase font-black text-neo-black">ID: {inspectingLead.id}</span>
+                </div>
+                
+                <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                  <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Name</span>
+                  <span className="text-neo-accent font-bold text-right">{inspectingLead.name}</span>
+                </div>
+
+                <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                  <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Status</span>
+                  <span className="text-neo-accent font-bold text-right">{inspectingLead.status}</span>
+                </div>
+
+                <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                  <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Source</span>
+                  <span className="text-neo-accent font-bold text-right">{inspectingLead.source}</span>
+                </div>
+
+                {inspectingLead.email && (
+                  <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                    <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Email</span>
+                    <span className="text-neo-accent font-bold text-right">{inspectingLead.email}</span>
+                  </div>
+                )}
+
+                {inspectingLead.phone && (
+                  <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                    <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Phone</span>
+                    <span className="text-neo-accent font-bold text-right">{inspectingLead.phone}</span>
+                  </div>
+                )}
+
+                {inspectingLead.age && (
+                  <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                    <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Age</span>
+                    <span className="text-neo-accent font-bold text-right">{inspectingLead.age}</span>
+                  </div>
+                )}
+
+                {inspectingLead.gender && (
+                  <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                    <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Gender</span>
+                    <span className="text-neo-accent font-bold text-right">{inspectingLead.gender}</span>
+                  </div>
+                )}
+
+                {inspectingLead.address && (
+                  <div className="flex flex-col gap-1 border-b border-neo-muted py-1">
+                    <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">Address</span>
+                    <span className="text-neo-accent font-bold break-words">{inspectingLead.address}</span>
+                  </div>
+                )}
+
+                {inspectingLead.fbLeadId && (
+                  <div className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                    <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">FB Lead ID</span>
+                    <span className="text-neo-accent font-bold text-right">{inspectingLead.fbLeadId}</span>
+                  </div>
+                )}
+
+                {inspectingLead.fbRawFields && Object.keys(inspectingLead.fbRawFields).length > 0 && (
+                  <>
+                    <div className="flex justify-between items-center border-b border-neo-black pb-1 mt-4 mb-2">
+                      <span className="text-[10px] uppercase text-neo-accent font-black">Facebook Payload Fields</span>
+                    </div>
+                    {Object.entries(inspectingLead.fbRawFields).map(([key, val]) => (
+                      <div key={key} className="flex justify-between gap-4 border-b border-neo-muted py-1 flex-wrap">
+                        <span className="text-neo-black uppercase tracking-wider text-[10px] font-black">{key.replace(/_/g, ' ')}</span>
+                        <span className="text-neo-accent font-bold text-right">{String(val)}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {inspectingLead.fbAdId && (
+                  <div className="flex justify-between gap-4 border-b border-neo-muted py-1 mt-2 font-black text-[9px] uppercase opacity-75">
+                    <span>Ad Identifier</span>
+                    <span>{inspectingLead.fbAdId}</span>
+                  </div>
+                )}
+                {inspectingLead.fbSubmittedAt && (
+                  <div className="flex justify-between gap-4 py-1 font-black text-[9px] uppercase opacity-75">
+                    <span>Time Submitted</span>
+                    <span>{new Date(inspectingLead.fbSubmittedAt).toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
       </main>
     </div>
   );

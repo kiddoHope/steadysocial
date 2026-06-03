@@ -1970,6 +1970,70 @@ app.delete('/campaigns/:id', async (req, res) => {
 });
 
 
+// --- Automations Endpoints ---
+
+app.get('/automations', async (req, res) => {
+    try {
+        const automations = await readJsonl('automations.jsonl');
+        res.json(automations);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/automations', async (req, res) => {
+    try {
+        const ruleData = req.body;
+        const newRule = {
+            ...ruleData,
+            id: ruleData.id || `rule-${Date.now()}`,
+            createdAt: ruleData.createdAt || Date.now(),
+            runCount: ruleData.runCount || 0,
+        };
+        await appendJsonl('automations.jsonl', newRule);
+        res.status(201).json(newRule);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/automations/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updatedData = req.body;
+        const automations = await readJsonl('automations.jsonl');
+        const index = automations.findIndex(a => a.id === id);
+
+        if (index !== -1) {
+            automations[index] = {
+                ...automations[index],
+                ...updatedData,
+                id: automations[index].id,
+            };
+            await writeJsonl('automations.jsonl', automations);
+            res.json(automations[index]);
+        } else {
+            res.status(404).json({ message: 'Automation rule not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/automations/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const automations = await readJsonl('automations.jsonl');
+        const filtered = automations.filter(a => a.id !== id);
+
+        await writeJsonl('automations.jsonl', filtered);
+        res.status(204).send();
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 // --- Task Extraction Utility ---
 /**
  * Extract tasks from markdown content

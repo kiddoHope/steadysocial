@@ -1,0 +1,1 @@
+{"name":"test","trigger":"NEW_MESSAGE_RECEIVED","action":"TAG_LEAD_HOT","isEnabled":true,"runCount":0,"id":"rule-1780509501138","createdAt":1780509501138}
