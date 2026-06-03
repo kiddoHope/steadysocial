@@ -47,6 +47,7 @@ const PlanningPage: React.FC = () => {
   const [isLoadingContent, setIsLoadingContent] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editText, setEditText] = useState<string>('');
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   // Pin File State (persisted in localStorage)
   const [pinnedPaths, setPinnedPaths] = useState<Set<string>>(() => {
@@ -868,9 +869,13 @@ const PlanningPage: React.FC = () => {
         </div>
 
         {/* Right Side: Interactive Preview / Content Workspace Panel */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className={`flex-1 flex flex-col min-w-0 ${isFullscreen ? 'z-50' : ''}`}>
           {activeFile ? (
-            <Card className="bg-white neo-shadow-md border-4 border-neo-black flex-1 flex flex-col">
+            <Card className={`bg-white border-4 border-neo-black flex flex-col ${
+              isFullscreen 
+                ? 'fixed inset-4 z-50 neo-shadow-2xl' 
+                : 'neo-shadow-md flex-1'
+            }`}>
               {/* Workspace Header */}
               <div className="flex justify-between items-center bg-neo-black text-white p-4 border-b-4 border-neo-black flex-shrink-0">
                 <div className="min-w-0 pr-4">
@@ -928,14 +933,28 @@ const PlanningPage: React.FC = () => {
                       {isEditing ? 'CANCEL_EDIT' : 'INLINE_EDIT'}
                     </Button>
                   )}
-                  <Button variant="danger" size="sm" onClick={() => { setActiveFile(null); setActiveFileContent(null); }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="bg-neo-secondary text-neo-black border-2 border-neo-black font-black uppercase hover:bg-white"
+                    onClick={() => setIsFullscreen(!isFullscreen)}
+                    title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                  >
+                    <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'} mr-1`}></i>
+                    {isFullscreen ? 'EXIT' : 'FULLSCREEN'}
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={() => { setActiveFile(null); setActiveFileContent(null); setIsFullscreen(false); }}>
                     CLOSE
                   </Button>
                 </div>
               </div>
 
               {/* Workspace body */}
-              <div className="flex-1 min-h-0 overflow-y-auto min-h-[500px] max-h-[80vh] p-6 relative">
+              <div className={`flex-1 min-h-0 overflow-y-auto p-6 relative ${
+                isFullscreen 
+                  ? 'h-full max-h-none' 
+                  : 'min-h-[500px] max-h-[80vh]'
+              }`}>
                 {isLoadingContent ? (
                   <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-20">
                     <LoadingSpinner size="lg" />
@@ -1091,7 +1110,7 @@ const PlanningPage: React.FC = () => {
 
                         {/* INTERACTIVE HTML SLIDES / DOCK WIDGETS */}
                         {activeFileContent.fileType === 'html' && !isEditing && (
-                          <div className="neo-border-sm bg-white h-[450px] overflow-hidden relative">
+                          <div className={`neo-border-sm bg-white overflow-hidden relative ${isFullscreen ? 'h-[calc(100vh-200px)]' : 'h-[450px]'}`}>
                             <iframe
                               title="Plan Visualizer"
                               srcDoc={activeFileContent.html || ''}
@@ -1123,7 +1142,7 @@ const PlanningPage: React.FC = () => {
 
                 {/* PDF VIEWER (Direct url binding into custom PDF browser engine iframe) */}
                 {activeFile && activeFile.fileType === 'pdf' && (
-                  <div className="w-full h-[600px] neo-border-sm bg-white overflow-hidden relative">
+                  <div className={`w-full neo-border-sm bg-white overflow-hidden relative ${isFullscreen ? 'h-[calc(100vh-200px)]' : 'h-[600px]'}`}>
                     <iframe
                       title="PDF Plane Viewer"
                       src={getPlanningFileRawUrl(activeFile.path)}
