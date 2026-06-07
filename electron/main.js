@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, globalShortcut  } from 'electron';
+import { spawn } from 'child_process';
+import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -140,9 +142,90 @@ function isNetworkError(error) {
 }
 
 let backendServer = null;
+let backendProcess = null;
 
-function startBackendServer() {
-    return new Promise((resolve, reject) => {
+function isPortOpen(port, host = '127.0.0.1') {
+    return new Promise((resolve) => {
+        const socket = new net.Socket();
+
+        socket.setTimeout(700);
+
+        socket.once('connect', () => {
+            socket.destroy();
+            resolve(true);
+        });
+
+        socket.once('timeout', () => {
+            socket.destroy();
+            resolve(false);
+        });
+
+        socket.once('error', () => {
+            socket.destroy();
+            resolve(false);
+        });
+
+        socket.connect(port, host);
+    });
+}
+
+async function waitForBackend(port, host = '127.0.0.1', attempts = 30) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        if (await isPortOpen(port, host)) {
+            return true;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    return false;
+}
+
+function startNpmBackendServer() {
+    const projectRoot = path.join(__dirname, '..');
+
+    backendProcess = spawn('npm', ['run', 'server'], {
+        cwd: projectRoot,
+        shell: true,
+        stdio: 'inherit',
+        env: {
+            ...process.env,
+            NODE_ENV: process.env.NODE_ENV || 'development',
+        },
+    });
+
+    backendProcess.on('exit', (code) => {
+        if (code !== 0 && !app.isQuitting) {
+            console.error(`Backend server exited with code ${code}`);
+        }
+    });
+
+    backendProcess.on('error', (error) => {
+        console.error('Failed to spawn backend server:', error);
+    });
+}
+
+async function startBackendServer() {
+    const backendAlreadyRunning = await isPortOpen(PORT);
+
+    if (backendAlreadyRunning) {
+        console.log(`Backend already running at http://127.0.0.1:${PORT}`);
+        return;
+    }
+
+    if (process.env.NODE_ENV === 'development') {
+        console.log('Starting backend with npm run server...');
+        startNpmBackendServer();
+
+        const isReady = await waitForBackend(PORT);
+        if (!isReady) {
+            throw new Error(`Backend server did not start on port ${PORT}.`);
+        }
+
+        return;
+    }
+
+    await new Promise((resolve, reject) => {
         backendServer = expressApp.listen(PORT, '127.0.0.1', () => {
             console.log(`Electron Backend running on http://127.0.0.1:${PORT}`);
             resolve();
@@ -184,9 +267,18 @@ function createWindow() {
 app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
 
-    await startBackendServer();
-
-    createWindow();
+    try {
+        await startBackendServer();
+        createWindow();
+    } catch (error) {
+        console.error('Unable to start the app:', error);
+        dialog.showErrorBox(
+            'Backend Server Failed',
+            error.message || 'The local backend server could not be started.'
+        );
+        app.quit();
+        return;
+    }
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -194,6 +286,13 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+    app.isQuitting = true;
+    globalShortcut.unregisterAll();
+
+    if (backendProcess && !backendProcess.killed) {
+        backendProcess.kill();
+    }
+
     if (backendServer) {
         backendServer.close();
     }

@@ -3,6 +3,7 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import mammoth from 'mammoth';
@@ -12,7 +13,14 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3001;
-const FACEBOOK_GRAPH_VERSION = 'v21.0';
+const FACEBOOK_GRAPH_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v21.0';
+const FACEBOOK_OAUTH_STATE_FILE = 'facebook_oauth_states.jsonl';
+const FACEBOOK_OAUTH_SCOPES = [
+    'pages_show_list',
+    'pages_manage_metadata',
+    'pages_messaging',
+    'pages_read_engagement',
+];
 
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
@@ -132,6 +140,224 @@ async function getStoredFacebookSettings() {
 
     return facebookSettings;
 }
+
+
+async function saveStoredFacebookSettings(newSettings) {
+    const settings = await readJsonl('settings.jsonl');
+    const index = settings.findIndex(s => s.type === 'facebook');
+
+    if (index !== -1) {
+        settings[index] = {
+            ...settings[index],
+            ...newSettings,
+            type: 'facebook',
+        };
+    } else {
+        settings.push({
+            type: 'facebook',
+            ...newSettings,
+        });
+    }
+
+    await writeJsonl('settings.jsonl', settings);
+    return settings.find(s => s.type === 'facebook');
+}
+
+function getBackendBaseUrl(req) {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.get('host') || `localhost:${PORT}`;
+    return `${protocol}://${host}`;
+}
+
+function normalizeOAuthRedirectUri(req, redirectUri) {
+    return String(redirectUri || `${getBackendBaseUrl(req)}/facebook/oauth/callback`).trim();
+}
+
+function getFacebookAppCredentials(reqBody = {}, settings = {}) {
+    const appId = String(
+        reqBody.appId ||
+        settings.appId ||
+        process.env.FB_APP_ID ||
+        ''
+    ).trim();
+
+    const appSecret = String(
+        reqBody.appSecret ||
+        settings.appSecret ||
+        process.env.FB_APP_SECRET ||
+        ''
+    ).trim();
+
+    return { appId, appSecret };
+}
+
+async function saveFacebookOAuthState(stateRecord) {
+    const existingStates = await readJsonl(FACEBOOK_OAUTH_STATE_FILE);
+    const now = Date.now();
+    const activeStates = existingStates
+        .filter(item => item && item.expiresAt && item.expiresAt > now && item.state !== stateRecord.state)
+        .slice(-25);
+
+    activeStates.push(stateRecord);
+    await writeJsonl(FACEBOOK_OAUTH_STATE_FILE, activeStates);
+}
+
+async function consumeFacebookOAuthState(state) {
+    const existingStates = await readJsonl(FACEBOOK_OAUTH_STATE_FILE);
+    const now = Date.now();
+    const matchingState = existingStates.find(item => item.state === state);
+    const remainingStates = existingStates.filter(item => item.state !== state && item.expiresAt && item.expiresAt > now);
+
+    await writeJsonl(FACEBOOK_OAUTH_STATE_FILE, remainingStates);
+
+    if (!matchingState) {
+        throw Object.assign(new Error('Invalid or expired Facebook OAuth state.'), { status: 400 });
+    }
+
+    if (!matchingState.expiresAt || matchingState.expiresAt <= now) {
+        throw Object.assign(new Error('Facebook OAuth state expired. Please start the login again.'), { status: 400 });
+    }
+
+    return matchingState;
+}
+
+function renderFacebookOAuthCallbackPage(payload) {
+    const safePayload = JSON.stringify(payload).replace(/</g, '\\u003c');
+
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Facebook Connection</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 32px; line-height: 1.5; background: #f7f7f7; color: #111; }
+    .card { max-width: 640px; margin: 10vh auto; padding: 24px; background: #fff; border: 2px solid #111; box-shadow: 8px 8px 0 #111; }
+    h1 { margin: 0 0 12px; font-size: 22px; }
+    p { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>${payload.success ? 'Facebook Page connected' : 'Facebook connection failed'}</h1>
+    <p>${payload.message || ''}</p>
+    <p>You can close this window and return to SteadySocial.</p>
+  </div>
+  <script>
+    (function () {
+      var payload = ${safePayload};
+      if (window.opener) {
+        window.opener.postMessage(Object.assign({ source: 'steadysocial-facebook-oauth' }, payload), '*');
+      }
+      setTimeout(function () { window.close(); }, 800);
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+async function exchangeFacebookOAuthCode({ appId, appSecret, redirectUri, code }) {
+    const shortTokenUrl =
+        `https://graph.facebook.com/${FACEBOOK_GRAPH_VERSION}/oauth/access_token?` +
+        new URLSearchParams({
+            client_id: appId,
+            redirect_uri: redirectUri,
+            client_secret: appSecret,
+            code,
+        }).toString();
+
+    const shortTokenData = await fetchFacebookJson(shortTokenUrl);
+
+    const longTokenUrl =
+        `https://graph.facebook.com/${FACEBOOK_GRAPH_VERSION}/oauth/access_token?` +
+        new URLSearchParams({
+            grant_type: 'fb_exchange_token',
+            client_id: appId,
+            client_secret: appSecret,
+            fb_exchange_token: shortTokenData.access_token,
+        }).toString();
+
+    const longTokenData = await fetchFacebookJson(longTokenUrl);
+
+    return {
+        shortLivedUserToken: shortTokenData.access_token,
+        longLivedUserToken: longTokenData.access_token,
+        longLivedUserTokenExpiresIn: longTokenData.expires_in,
+    };
+}
+
+async function fetchFacebookManagedPages(longLivedUserToken) {
+    const query = new URLSearchParams({
+        fields: 'id,name,access_token,picture{url},category,tasks,perms',
+        access_token: longLivedUserToken,
+        limit: '100',
+    });
+
+    const pages = [];
+    let nextUrl = `https://graph.facebook.com/${FACEBOOK_GRAPH_VERSION}/me/accounts?${query.toString()}`;
+
+    while (nextUrl) {
+        const pageData = await fetchFacebookJson(nextUrl);
+        pages.push(...(pageData.data || []));
+        nextUrl = pageData.paging?.next || null;
+    }
+
+    return pages;
+}
+
+async function subscribeFacebookPageToMessenger(pageId, pageAccessToken) {
+    const subscribedFields = 'messages,messaging_postbacks,messaging_optins';
+
+    const body = new URLSearchParams({
+        subscribed_fields: subscribedFields,
+        access_token: pageAccessToken,
+    });
+
+    const subscribeUrl = `https://graph.facebook.com/${FACEBOOK_GRAPH_VERSION}/${pageId}/subscribed_apps`;
+    const data = await fetchFacebookJson(subscribeUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body,
+    });
+
+    return {
+        success: Boolean(data.success),
+        subscribedFields: subscribedFields.split(','),
+        response: data,
+    };
+}
+
+function normalizeFacebookOAuthPages(rawPages = [], existingSettings = {}) {
+    const existingPages = Array.isArray(existingSettings.pages) ? existingSettings.pages : [];
+    const existingContexts = existingSettings.pageContexts || {};
+
+    return rawPages
+        .filter(page => page?.id && page?.access_token)
+        .map((page, index) => {
+            const existingPage = existingPages.find(item => item.id === page.id) || {};
+
+            return {
+                ...existingPage,
+                id: page.id,
+                name: page.name || existingPage.name || '',
+                accessToken: page.access_token,
+                access_token: page.access_token,
+                category: page.category || existingPage.category || '',
+                pictureUrl: page.picture?.data?.url || existingPage.pictureUrl || '',
+                tasks: page.tasks || page.perms || existingPage.tasks || [],
+                permissions: existingPage.permissions || [],
+                features: existingPage.features,
+                isDefault: existingSettings.defaultPageId
+                    ? page.id === existingSettings.defaultPageId
+                    : index === 0,
+                status: 'connected',
+                lastTestedAt: new Date().toISOString(),
+                aiAgentContext: existingContexts[page.id] || existingPage.aiAgentContext || '',
+            };
+        });
+}
+
 
 function getFacebookErrorMessage(fbData) {
     return (
@@ -459,27 +685,262 @@ app.get('/settings/facebook', async (req, res) => {
 
 app.put('/settings/facebook', async (req, res) => {
     try {
-        const newSettings = req.body;
-        const settings = await readJsonl('settings.jsonl');
-        const index = settings.findIndex(s => s.type === 'facebook');
+        const savedSettings = await saveStoredFacebookSettings(req.body);
+        res.json(savedSettings);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
-        if (index !== -1) {
-            settings[index] = {
-                ...settings[index],
-                ...newSettings,
-                type: 'facebook',
-            };
-        } else {
-            settings.push({
-                type: 'facebook',
-                ...newSettings,
+// --- Facebook OAuth Login Flow ---
+
+app.post('/facebook/oauth/start', async (req, res) => {
+    try {
+        const settings = await getStoredFacebookSettings();
+        const { appId, appSecret } = getFacebookAppCredentials(req.body || {}, settings);
+        const redirectUri = normalizeOAuthRedirectUri(req, req.body?.redirectUri);
+        const clientId = String(req.body?.clientId || 'settings-page');
+
+        if (!appId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Facebook App ID is required.',
             });
         }
 
-        await writeJsonl('settings.jsonl', settings);
-        res.json(settings.find(s => s.type === 'facebook'));
+        if (!appSecret) {
+            return res.status(400).json({
+                success: false,
+                message: 'Facebook App Secret is required.',
+            });
+        }
+
+        const state = crypto.randomBytes(32).toString('hex');
+
+        await saveFacebookOAuthState({
+            state,
+            appId,
+            appSecret,
+            redirectUri,
+            clientId,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 10 * 60 * 1000,
+        });
+
+        await saveStoredFacebookSettings({
+            appId,
+            appSecret,
+            oauthRedirectUri: redirectUri,
+            oauthScopes: FACEBOOK_OAUTH_SCOPES,
+            isEnabled: settings.isEnabled ?? true,
+        });
+
+        const loginUrl =
+            `https://www.facebook.com/${FACEBOOK_GRAPH_VERSION}/dialog/oauth?` +
+            new URLSearchParams({
+                client_id: appId,
+                redirect_uri: redirectUri,
+                state,
+                response_type: 'code',
+                auth_type: 'rerequest',
+                scope: FACEBOOK_OAUTH_SCOPES.join(','),
+            }).toString();
+
+        return res.json({
+            success: true,
+            loginUrl,
+            redirectUri,
+            scopes: FACEBOOK_OAUTH_SCOPES,
+        });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('[facebook/oauth/start] Failed:', error);
+        return res.status(error.status || 500).json({
+            success: false,
+            message: error.message || 'Could not start Facebook OAuth.',
+        });
+    }
+});
+
+app.get('/facebook/oauth/callback', async (req, res) => {
+    try {
+        if (req.query.error) {
+            const errorMessage = req.query.error_description || req.query.error_reason || req.query.error;
+            return res
+                .status(400)
+                .send(renderFacebookOAuthCallbackPage({
+                    success: false,
+                    message: String(errorMessage || 'Facebook authorization was cancelled.'),
+                }));
+        }
+
+        const code = String(req.query.code || '');
+        const state = String(req.query.state || '');
+
+        if (!code) {
+            return res
+                .status(400)
+                .send(renderFacebookOAuthCallbackPage({
+                    success: false,
+                    message: 'Facebook did not return an authorization code.',
+                }));
+        }
+
+        if (!state) {
+            return res
+                .status(400)
+                .send(renderFacebookOAuthCallbackPage({
+                    success: false,
+                    message: 'Missing OAuth state. Please start the login again.',
+                }));
+        }
+
+        const stateRecord = await consumeFacebookOAuthState(state);
+
+        const tokenData = await exchangeFacebookOAuthCode({
+            appId: stateRecord.appId,
+            appSecret: stateRecord.appSecret,
+            redirectUri: stateRecord.redirectUri,
+            code,
+        });
+
+        const rawPages = await fetchFacebookManagedPages(tokenData.longLivedUserToken);
+        const existingSettings = await getStoredFacebookSettings();
+        const pages = normalizeFacebookOAuthPages(rawPages, existingSettings);
+
+        if (pages.length === 0) {
+            return res
+                .status(400)
+                .send(renderFacebookOAuthCallbackPage({
+                    success: false,
+                    message: 'Facebook Login succeeded, but no manageable Pages were returned. Make sure pages_show_list is approved and the Facebook user has Page access.',
+                }));
+        }
+
+        const subscriptionResults = [];
+
+        for (const page of pages) {
+            try {
+                const subscription = await subscribeFacebookPageToMessenger(page.id, page.accessToken);
+                subscriptionResults.push({
+                    pageId: page.id,
+                    pageName: page.name,
+                    success: true,
+                    subscribedFields: subscription.subscribedFields,
+                });
+            } catch (subscribeError) {
+                console.warn(`[facebook/oauth/callback] Webhook subscription failed for page ${page.id}:`, subscribeError.message);
+                subscriptionResults.push({
+                    pageId: page.id,
+                    pageName: page.name,
+                    success: false,
+                    message: subscribeError.message,
+                });
+            }
+        }
+
+        const defaultPage = pages.find(page => page.isDefault) || pages[0];
+        const pageContexts = pages.reduce((acc, page) => {
+            if (page.aiAgentContext) acc[page.id] = page.aiAgentContext;
+            return acc;
+        }, { ...(existingSettings.pageContexts || {}) });
+
+        await saveStoredFacebookSettings({
+            isEnabled: true,
+            appId: stateRecord.appId,
+            appSecret: stateRecord.appSecret,
+            oauthRedirectUri: stateRecord.redirectUri,
+            oauthConnectedAt: new Date().toISOString(),
+            oauthScopes: FACEBOOK_OAUTH_SCOPES,
+            longLivedUserAccessToken: tokenData.longLivedUserToken,
+            longLivedUserTokenExpiresIn: tokenData.longLivedUserTokenExpiresIn,
+            accessToken: defaultPage.accessToken,
+            pageAccessToken: defaultPage.accessToken,
+            pageId: defaultPage.id,
+            selectedPageId: defaultPage.id,
+            pageName: defaultPage.name || '',
+            defaultPageId: defaultPage.id,
+            pages,
+            pageContexts,
+            aiAgentContext: defaultPage.aiAgentContext || existingSettings.aiAgentContext || '',
+            subscriptionResults,
+        });
+
+        const failedSubscriptions = subscriptionResults.filter(item => !item.success);
+        const message = failedSubscriptions.length > 0
+            ? `Connected ${pages.length} Facebook Page(s). ${failedSubscriptions.length} Page webhook subscription(s) need review in Meta App Dashboard.`
+            : `Connected ${pages.length} Facebook Page(s) and subscribed Messenger webhooks.`;
+
+        return res.send(renderFacebookOAuthCallbackPage({
+            success: true,
+            message,
+            pageCount: pages.length,
+            pages: pages.map(page => ({ id: page.id, name: page.name })),
+            subscriptionResults,
+        }));
+    } catch (error) {
+        console.error('[facebook/oauth/callback] Failed:', error);
+        return res
+            .status(error.status || 500)
+            .send(renderFacebookOAuthCallbackPage({
+                success: false,
+                message: error.message || 'Facebook OAuth callback failed.',
+            }));
+    }
+});
+
+app.post('/facebook/oauth/disconnect', async (req, res) => {
+    try {
+        const settings = await getStoredFacebookSettings();
+
+        const savedSettings = await saveStoredFacebookSettings({
+            isEnabled: false,
+            appId: settings.appId || '',
+            appSecret: settings.appSecret || '',
+            oauthRedirectUri: settings.oauthRedirectUri || '',
+            oauthDisconnectedAt: new Date().toISOString(),
+            longLivedUserAccessToken: '',
+            longLivedUserTokenExpiresIn: '',
+            accessToken: '',
+            pageAccessToken: '',
+            pageId: '',
+            selectedPageId: '',
+            pageName: '',
+            defaultPageId: '',
+            pages: [],
+            subscriptionResults: [],
+        });
+
+        return res.json({
+            success: true,
+            settings: savedSettings,
+        });
+    } catch (error) {
+        console.error('[facebook/oauth/disconnect] Failed:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Could not disconnect Facebook.',
+        });
+    }
+});
+
+app.post('/facebook/subscribe-page', async (req, res) => {
+    try {
+        const settings = await getStoredFacebookSettings();
+        const pageId = req.body?.pageId || settings.pageId || settings.selectedPageId;
+        const accessToken = req.body?.accessToken || req.body?.access_token || resolveAccessToken(req, settings);
+
+        if (!pageId) {
+            return res.status(400).json({ success: false, message: 'pageId is required.' });
+        }
+
+        if (!accessToken) {
+            return res.status(400).json({ success: false, message: 'Page access token is required.' });
+        }
+
+        const subscription = await subscribeFacebookPageToMessenger(pageId, accessToken);
+        return res.json({ success: true, ...subscription });
+    } catch (error) {
+        return sendFacebookError(res, error, 'Facebook page webhook subscription failed.');
     }
 });
 

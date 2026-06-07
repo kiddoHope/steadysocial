@@ -1,7 +1,7 @@
 {
   "name": "steadysocial",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "main": "electron/main.js",
   "homepage": ".",
@@ -66,7 +66,8 @@
       "package.json",
       "assets/**/*",
       "skills/**/*",
-      "steadysocial-mcp-server/**/*"
+      "steadysocial-mcp-server/**/*",
+      "server/*"
     ],
     "win": {
       "target": "portable",

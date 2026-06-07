@@ -27,6 +27,17 @@ type McpClientType = 'claude-desktop' | 'codex' | 'pi-coding-agent' | 'generic';
 
 type BackendRouteStatus = 'unknown' | 'online' | 'offline';
 
+const FACEBOOK_BACKEND_URL = 'http://localhost:3001';
+const FACEBOOK_OAUTH_CALLBACK_URL = `${FACEBOOK_BACKEND_URL}/facebook/oauth/callback`;
+
+interface FacebookOAuthMessage {
+  source?: string;
+  success?: boolean;
+  message?: string;
+  pageCount?: number;
+  pages?: { id: string; name?: string }[];
+}
+
 interface McpConfigState {
   mcpServerPath: string;
   apiUrl: string;
@@ -35,27 +46,23 @@ interface McpConfigState {
 
 const fetchFacebookPageInfo = async (page: ManagedFacebookPage) => {
   const response = await fetch(
-    `https://graph.facebook.com/v23.0/${encodeURIComponent(
-      page.id
-    )}?fields=id,name&access_token=${encodeURIComponent(page.accessToken)}`,
+    `${FACEBOOK_BACKEND_URL}/facebook/page-info/${encodeURIComponent(page.id)}?fields=id,name`,
     {
       headers: {
         Accept: 'application/json',
+        'x-access-token': page.accessToken,
       },
     }
   );
 
   const data = await response.json();
-  console.log(data);
-  
 
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `Facebook Graph API returned HTTP ${response.status}`);
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error?.message || data?.message || `Facebook Graph API returned HTTP ${response.status}`);
   }
 
   return data as { id: string; name: string };
 };
-
 const MCP_CONFIG_STORAGE_KEY = 'steadysocial_mcp_agent_config';
 
 const DEFAULT_MCP_CONFIG: McpConfigState = {
@@ -253,6 +260,55 @@ export const SettingsPage: React.FC = () => {
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    const handleFacebookOAuthMessage = async (event: MessageEvent<FacebookOAuthMessage>) => {
+      if (event.origin !== new URL(FACEBOOK_BACKEND_URL).origin) return;
+      if (event.data?.source !== 'steadysocial-facebook-oauth') return;
+
+      setIsFbProcessing(false);
+
+      if (!event.data.success) {
+        setMainAppLoginStatus('not_authorized');
+        setConnectedPageName(null);
+        setFbActionMessage({
+          type: 'error',
+          text: event.data.message || 'Facebook login failed.',
+        });
+        return;
+      }
+
+      try {
+        const settings = (await dbGetFacebookSettings()) as MultiPageFacebookSettings;
+        const loadedPages = normalizeFacebookPages(settings);
+
+        setInputFbAppId(settings.appId || inputFbAppId);
+        setInputFbAppSecret((settings as any).appSecret || inputFbAppSecret);
+        setInputFbAccessToken('');
+        setInputFbPageId('');
+        setInputFbPageName('');
+        setFacebookPages(loadedPages);
+        setSelectedKnowledgePageId((loadedPages.find(page => page.isDefault) || loadedPages[0])?.id || '');
+        setAiAgentContext(settings.aiAgentContext || (loadedPages.find(page => page.isDefault) || loadedPages[0])?.aiAgentContext || aiAgentContext);
+        setMainAppLoginStatus('connected');
+        setConnectedPageName(loadedPages.map(page => page.name || page.id).join(', '));
+
+        setFbActionMessage({
+          type: 'success',
+          text: `Facebook OAuth connected ${loadedPages.length || event.data.pageCount || 0} page(s).`,
+        });
+      } catch (error: any) {
+        console.error('Failed to refresh Facebook OAuth settings:', error);
+        setFbActionMessage({
+          type: 'error',
+          text: `Facebook connected, but settings could not be refreshed: ${error?.message || 'Unknown error'}`,
+        });
+      }
+    };
+
+    window.addEventListener('message', handleFacebookOAuthMessage);
+    return () => window.removeEventListener('message', handleFacebookOAuthMessage);
+  }, [aiAgentContext, inputFbAppId, inputFbAppSecret]);
+
   const updateMcpConfig = useCallback((updates: Partial<McpConfigState>) => {
     setMcpConfig(prev => ({ ...prev, ...updates }));
     setMcpCopied(false);
@@ -341,6 +397,76 @@ export const SettingsPage: React.FC = () => {
       setIsTestingMcpBackend(false);
     }
   }, [mcpConfig.apiUrl]);
+
+  const handleStartFacebookOAuth = useCallback(async () => {
+    const appId = inputFbAppId.trim();
+    const appSecret = inputFbAppSecret.trim();
+
+    if (!appId) {
+      setFbActionMessage({ type: 'error', text: 'Facebook App ID must be provided.' });
+      return;
+    }
+
+    if (!appSecret) {
+      setFbActionMessage({ type: 'error', text: 'Facebook App Secret must be provided.' });
+      return;
+    }
+
+    setIsFbProcessing(true);
+    setFbActionMessage({
+      type: 'info',
+      text: 'Opening Facebook Login. Approve the requested Page permissions, then select the Page inside Facebook.',
+    });
+
+    try {
+      const response = await fetch(`${FACEBOOK_BACKEND_URL}/facebook/oauth/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appId,
+          appSecret,
+          redirectUri: FACEBOOK_OAUTH_CALLBACK_URL,
+          clientId: 'settings-page',
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success || !result.loginUrl) {
+        throw new Error(result.message || 'Could not start Facebook OAuth.');
+      }
+
+      const popup = window.open(
+        result.loginUrl,
+        'steadysocial_facebook_oauth',
+        'width=720,height=760,menubar=no,toolbar=no,location=yes,status=no'
+      );
+
+      if (!popup) {
+        setIsFbProcessing(false);
+        setFbActionMessage({
+          type: 'error',
+          text: 'The Facebook login popup was blocked. Allow popups for this site and try again.',
+        });
+        return;
+      }
+
+      const popupWatcher = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(popupWatcher);
+          setIsFbProcessing(false);
+        }
+      }, 750);
+    } catch (error: any) {
+      console.error('Facebook OAuth start failed:', error);
+      setIsFbProcessing(false);
+      setMainAppLoginStatus('not_authorized');
+      setFbActionMessage({
+        type: 'error',
+        text: `Facebook OAuth failed: ${error?.message || 'Unknown error'}`,
+      });
+    }
+  }, [inputFbAppId, inputFbAppSecret]);
 
   const handleAddFacebookPage = useCallback(() => {
     const pageId = inputFbPageId.trim();
@@ -482,7 +608,7 @@ export const SettingsPage: React.FC = () => {
     setCheckingPermissionsPageIds(prev => [...new Set([...prev, page.id])]);
 
     try {
-      const response = await fetch('http://localhost:3001/facebook/debug-token', {
+      const response = await fetch(`${FACEBOOK_BACKEND_URL}/facebook/debug-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -693,120 +819,31 @@ Respond only with the message text.
   };
 
   const handleConnect = useCallback(async () => {
-    const pagesToTest = sanitizeFacebookPages(
-      facebookPages.length > 0
-        ? facebookPages
-        : [
-            {
-              id: inputFbPageId,
-              name: inputFbPageName,
-              accessToken: inputFbAccessToken,
-              access_token: inputFbAccessToken,
-              isDefault: true,
-              status: 'unknown',
-            },
-          ]
-    );
+    await handleStartFacebookOAuth();
+  }, [handleStartFacebookOAuth]);
 
-    if (pagesToTest.length === 0) {
-      setFbActionMessage({
-        type: 'error',
-        text: 'Add at least one Facebook page with a Page ID and access token first.',
-      });
-      return;
-    }
-
+  const handleDisconnect = async () => {
     setIsFbProcessing(true);
     setFbActionMessage(null);
 
     try {
-      const results = await Promise.allSettled(
-        pagesToTest.map(async page => {
-          const pageInfo = await fetchFacebookPageInfo(page);
-          return {
-            ...page,
-            id: pageInfo.id || page.id,
-            name: pageInfo.name || page.name,
-            status: 'connected' as FacebookPageConnectionStatus,
-            lastTestedAt: new Date().toISOString(),
-          };
-        })
-      );
-
-      const isFulfilled = <T,>(
-        result: PromiseSettledResult<T>
-      ): result is PromiseFulfilledResult<T> => result.status === 'fulfilled';
-
-      const connectedPages: ConfiguredFacebookPage[] = results
-        .filter(isFulfilled)
-        .map(result => result.value);
-
-      const failedPageIds = results
-        .map((result, index) => ({ result, page: pagesToTest[index] }))
-        .filter(item => item.result.status === 'rejected')
-        .map(item => item.page.id);
-
-      setFacebookPages(prev => {
-        const sourcePages = prev.length > 0 ? prev : pagesToTest;
-
-        return sanitizeFacebookPages(
-          sourcePages.map(page => {
-            const connectedPage = connectedPages.find(item => item.id === page.id);
-            const failed = failedPageIds.includes(page.id);
-
-            if (connectedPage) {
-              return {
-                ...page,
-                ...connectedPage,
-              };
-            }
-
-            if (failed) {
-              return {
-                ...page,
-                status: 'not_authorized' as FacebookPageConnectionStatus,
-                lastTestedAt: new Date().toISOString(),
-              };
-            }
-
-            return page;
-          })
-        );
+      await fetch(`${FACEBOOK_BACKEND_URL}/facebook/oauth/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       });
-
-      if (connectedPages.length === 0) {
-        setMainAppLoginStatus('not_authorized');
-        setConnectedPageName(null);
-        setFbActionMessage({
-          type: 'error',
-          text: 'No configured Facebook pages connected successfully.',
-        });
-        return;
-      }
-
-      setMainAppLoginStatus('connected');
-      setConnectedPageName(connectedPages.map(page => page.name || page.id).join(', '));
-
-      setFbActionMessage({
-        type: failedPageIds.length > 0 ? 'info' : 'success',
-        text:
-          failedPageIds.length > 0
-            ? `${connectedPages.length} page(s) connected. ${failedPageIds.length} page(s) failed.`
-            : `${connectedPages.length} Facebook page(s) connected successfully.`,
-      });
-    } catch (err: any) {
-      console.error('Connection test failed:', err);
-      setMainAppLoginStatus('not_authorized');
-      setConnectedPageName(null);
-      setFbActionMessage({ type: 'error', text: `Connection failed: ${err.message}` });
+    } catch (error) {
+      console.warn('Backend disconnect failed, clearing local Facebook state only:', error);
     } finally {
+      setFacebookPages([]);
+      setSelectedKnowledgePageId('');
+      setInputFbAccessToken('');
+      setInputFbPageId('');
+      setInputFbPageName('');
+      setMainAppLoginStatus('unknown');
+      setConnectedPageName(null);
       setIsFbProcessing(false);
+      setFbActionMessage({ type: 'success', text: 'Facebook connection removed from this app.' });
     }
-  }, [facebookPages, inputFbAccessToken, inputFbPageId, inputFbPageName]);
-
-  const handleDisconnect = () => {
-    setMainAppLoginStatus('unknown');
-    setConnectedPageName(null);
   };
 
   if (isLoadingSettings) {
@@ -863,39 +900,45 @@ Respond only with the message text.
                 />
 
                 <div className="p-4 neo-border-sm bg-neo-muted space-y-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest">ADD_FACEBOOK_PAGE</p>
-                  <Input
-                    id="fbPageNameInput"
-                    label="PAGE_NAME_OPTIONAL"
-                    value={inputFbPageName}
-                    onChange={e => setInputFbPageName(e.target.value)}
-                    disabled={isSavingConfig || isFbProcessing}
-                    placeholder="Example: Fleur Sauvage"
-                  />
-                  <Input
-                    id="fbPageIdInput"
-                    label="PAGE_ID"
-                    value={inputFbPageId}
-                    onChange={e => setInputFbPageId(e.target.value)}
-                    disabled={isSavingConfig || isFbProcessing}
-                    placeholder="Your Facebook Page ID"
-                  />
-                  <Input
-                    id="fbAccessTokenInput"
-                    label="PAGE_ACCESS_TOKEN"
-                    value={inputFbAccessToken}
-                    onChange={e => setInputFbAccessToken(e.target.value)}
-                    disabled={isSavingConfig || isFbProcessing}
-                    type="password"
-                  />
-                  <Button
-                    onClick={handleAddFacebookPage}
-                    disabled={isSavingConfig || isFbProcessing || !inputFbPageId.trim() || !inputFbAccessToken.trim()}
-                    variant="secondary"
-                    className="w-full"
-                  >
-                    ADD_OR_UPDATE_PAGE
-                  </Button>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest">FACEBOOK_OAUTH_LOGIN</p>
+                    <p className="text-[10px] font-bold text-neo-black/60 uppercase tracking-wider leading-relaxed mt-2">
+                      Connect a client Page through Facebook Login. The backend will exchange the login code for a long-lived User token, fetch the Page tokens, save the connected Pages, and subscribe the Page to Messenger webhooks.
+                    </p>
+                  </div>
+
+                  <div className="p-3 neo-border-sm bg-white">
+                    <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-1">VALID_OAUTH_REDIRECT_URI</p>
+                    <p className="text-[10px] font-bold break-all">{FACEBOOK_OAUTH_CALLBACK_URL}</p>
+                    <p className="text-[9px] font-bold text-neo-black/50 uppercase tracking-wider mt-2">
+                      Add this exact URL in Meta App Dashboard → Facebook Login → Valid OAuth Redirect URIs.
+                    </p>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <Button
+                      onClick={handleStartFacebookOAuth}
+                      disabled={isSavingConfig || isFbProcessing || !inputFbAppId.trim() || !inputFbAppSecret.trim()}
+                      variant="primary"
+                      className="w-full"
+                      isLoading={isFbProcessing}
+                    >
+                      CONNECT_WITH_FACEBOOK
+                    </Button>
+                    <Button
+                      onClick={handleSaveFacebookConfig}
+                      disabled={isSavingConfig || isFbProcessing || !inputFbAppId.trim()}
+                      variant="secondary"
+                      className="w-full"
+                      isLoading={isSavingConfig}
+                    >
+                      SAVE_APP_CREDENTIALS
+                    </Button>
+                  </div>
+
+                  <p className="text-[9px] font-bold text-neo-black/50 uppercase tracking-wider">
+                    Do not paste Page tokens here. Tokens are now generated by the backend OAuth flow.
+                  </p>
                 </div>
 
                 <div className="space-y-3">
@@ -952,19 +995,21 @@ Respond only with the message text.
                               id={`fbPageId-${index}`}
                               label="PAGE_ID"
                               value={page.id}
-                              onChange={e => handleUpdateFacebookPage(index, { id: e.target.value })}
-                              disabled={isSavingConfig || isFbProcessing}
+                              disabled
                             />
                           </div>
 
-                          <Input
-                            id={`fbPageAccessToken-${index}`}
-                            label="PAGE_ACCESS_TOKEN"
-                            value={page.accessToken}
-                            onChange={e => handleUpdateFacebookPage(index, { accessToken: e.target.value, access_token: e.target.value })}
-                            disabled={isSavingConfig || isFbProcessing}
-                            type="password"
-                          />
+                          <div className="p-3 neo-border-sm bg-white">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[9px] font-black uppercase tracking-widest opacity-60">PAGE_TOKEN</span>
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                {page.accessToken ? 'STORED_FROM_OAUTH' : 'MISSING'}
+                              </span>
+                            </div>
+                            <p className="text-[9px] font-bold text-neo-black/50 uppercase tracking-wider mt-2">
+                              Page token is generated by Facebook Login and should not be edited manually.
+                            </p>
+                          </div>
 
                           {/* Feature Flags from Permissions */}
                           {page.features && (
@@ -1039,7 +1084,7 @@ Respond only with the message text.
                   ) : (
                     <div className="p-4 neo-border-sm bg-neo-bg">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-neo-black/60">
-                        No Facebook pages added yet. Add each page with its own Page ID and Page Access Token.
+                        No Facebook pages connected yet. Use Facebook OAuth Login above to connect Pages automatically.
                       </p>
                     </div>
                   )}
@@ -1052,7 +1097,7 @@ Respond only with the message text.
                   className="w-full !py-4"
                   isLoading={isSavingConfig}
                 >
-                  COMMIT_CONFIGURATION
+                  SAVE_FACEBOOK_CONFIGURATION
                 </Button>
               </div>
             </Card>
@@ -1272,9 +1317,9 @@ Respond only with the message text.
             <Card title="GRAPH_API_CONTROL" className="!p-8 neo-shadow-lg bg-neo-muted">
               <div className="space-y-8">
                 <div>
-                  <h3 className="text-sm font-black uppercase tracking-widest mb-4">GRAPH_API v23.0</h3>
+                  <h3 className="text-sm font-black uppercase tracking-widest mb-4">GRAPH_API BACKEND</h3>
                   <p className="text-[10px] font-bold text-neo-black/60 mb-4 uppercase tracking-wider">
-                    Direct requests to graph.facebook.com/{'{pageId}'} - No SDK required
+                    Requests are sent through the local backend using the OAuth-generated Page token.
                   </p>
 
                   {connectedPageName && mainAppLoginStatus === 'connected' && (
@@ -1321,11 +1366,11 @@ Respond only with the message text.
                       className="w-full py-4"
                       disabled={
                         isFbProcessing ||
-                        (facebookPages.length === 0 && (!inputFbPageId.trim() || !inputFbAccessToken.trim()))
+                        (!inputFbAppId.trim() || !inputFbAppSecret.trim())
                       }
                       isLoading={isFbProcessing}
                     >
-                      TEST_ALL_PAGE_CONNECTIONS
+                      CONNECT_WITH_FACEBOOK_LOGIN
                     </Button>
                   ) : (
                     <Button onClick={handleDisconnect} variant="danger" className="w-full py-4">
