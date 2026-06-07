@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Input from '../components/ui/Input';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
-import { FacebookSettings } from '../types';
+import { FacebookSettings, ManagedFacebookPage, FacebookPermissionKey } from '../types';
 import Button from '../components/ui/Button';
 import {
   dbGetFacebookSettings,
@@ -13,6 +13,15 @@ import Card from '../components/ui/Card';
 import Select from '../components/ui/Select';
 import { useAI } from '../contexts/AIContext';
 import { AIProvider } from '../types';
+import {
+  normalizeFacebookPages,
+  sanitizeFacebookPages,
+  buildFacebookPageFeatures,
+  getFacebookPageAccessToken,
+  ConfiguredFacebookPage,
+  MultiPageFacebookSettings,
+  FacebookPageConnectionStatus,
+} from '../utils/facebookPageUtils';
 
 type McpClientType = 'claude-desktop' | 'codex' | 'pi-coding-agent' | 'generic';
 
@@ -23,106 +32,6 @@ interface McpConfigState {
   apiUrl: string;
   selectedClient: McpClientType;
 }
-
-type FacebookPageConnectionStatus = 'unknown' | 'connected' | 'not_authorized';
-
-interface ManagedFacebookPage {
-  id: string;
-  name?: string;
-  accessToken: string;
-  access_token?: string;
-  isDefault?: boolean;
-  status?: FacebookPageConnectionStatus;
-  lastTestedAt?: string;
-  aiAgentContext?: string;
-}
-
-interface MultiPageFacebookSettings extends FacebookSettings {
-  pages?: ManagedFacebookPage[];
-  defaultPageId?: string;
-  pageName?: string;
-  pageContexts?: Record<string, string>;
-  pageAiContexts?: Record<string, string>;
-  aiAgentContextsByPage?: Record<string, string>;
-}
-
-const normalizeFacebookPages = (
-  settings?: MultiPageFacebookSettings | null
-): ManagedFacebookPage[] => {
-  if (!settings) return [];
-
-  const pageContextMap = {
-    ...(settings.pageContexts || {}),
-    ...(settings.pageAiContexts || {}),
-    ...(settings.aiAgentContextsByPage || {}),
-  };
-
-  if (Array.isArray(settings.pages) && settings.pages.length > 0) {
-    const normalizedPages = settings.pages
-      .map((page, index) => ({
-        id: String(page.id || '').trim(),
-        name: page.name || '',
-        accessToken: String(page.accessToken || page.access_token || '').trim(),
-        isDefault:
-          Boolean(page.isDefault) ||
-          Boolean(settings.defaultPageId && page.id === settings.defaultPageId) ||
-          (!settings.defaultPageId && index === 0),
-        status: page.status || 'unknown',
-        lastTestedAt: page.lastTestedAt,
-        aiAgentContext: page.aiAgentContext || pageContextMap[String(page.id || '').trim()] || '',
-      }))
-      .filter(page => page.id && page.accessToken);
-
-    if (normalizedPages.length === 0) return [];
-
-    const hasDefault = normalizedPages.some(page => page.isDefault);
-    return normalizedPages.map((page, index) => ({
-      ...page,
-      isDefault: hasDefault ? page.isDefault : index === 0,
-    }));
-  }
-
-  const legacyPageId = String(settings.pageId || '').trim();
-  const legacyAccessToken = String(settings.accessToken || '').trim();
-
-  if (!legacyPageId && !legacyAccessToken) return [];
-
-  const legacyPage: ManagedFacebookPage = {
-    id: legacyPageId,
-    name: settings.pageName || '',
-    accessToken: legacyAccessToken,
-    isDefault: true,
-    status: 'unknown',
-    aiAgentContext: settings.aiAgentContext || pageContextMap[legacyPageId] || '',
-  };
-
-  return legacyPage.id && legacyPage.accessToken ? [legacyPage] : [];
-};
-
-const sanitizeFacebookPages = (pages: ManagedFacebookPage[]): ManagedFacebookPage[] => {
-  const cleanedPages = pages
-    .map(page => ({
-      ...page,
-      id: page.id.trim(),
-      name: page.name?.trim() || '',
-      accessToken: page.accessToken.trim(),
-      status: page.status || 'unknown',
-      aiAgentContext: page.aiAgentContext?.trim() || '',
-    }))
-    .filter(page => page.id && page.accessToken);
-
-  if (cleanedPages.length === 0) return [];
-
-  const defaultIndex = Math.max(
-    0,
-    cleanedPages.findIndex(page => page.isDefault)
-  );
-
-  return cleanedPages.map((page, index) => ({
-    ...page,
-    isDefault: index === defaultIndex,
-  }));
-};
 
 const fetchFacebookPageInfo = async (page: ManagedFacebookPage) => {
   const response = await fetch(
@@ -137,6 +46,8 @@ const fetchFacebookPageInfo = async (page: ManagedFacebookPage) => {
   );
 
   const data = await response.json();
+  console.log(data);
+  
 
   if (!response.ok) {
     throw new Error(data?.error?.message || `Facebook Graph API returned HTTP ${response.status}`);
@@ -256,10 +167,11 @@ export const SettingsPage: React.FC = () => {
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
 
   const [inputFbAppId, setInputFbAppId] = useState('');
+  const [inputFbAppSecret, setInputFbAppSecret] = useState('');
   const [inputFbAccessToken, setInputFbAccessToken] = useState('');
   const [inputFbPageId, setInputFbPageId] = useState('');
   const [inputFbPageName, setInputFbPageName] = useState('');
-  const [facebookPages, setFacebookPages] = useState<ManagedFacebookPage[]>([]);
+  const [facebookPages, setFacebookPages] = useState<ConfiguredFacebookPage[]>([]);
   const [mainAppLoginStatus, setMainAppLoginStatus] = useState<'unknown' | 'connected' | 'not_authorized'>('unknown');
   const [connectedPageName, setConnectedPageName] = useState<string | null>(null);
   const [aiAgentContext, setAiAgentContext] = useState('');
@@ -276,6 +188,7 @@ export const SettingsPage: React.FC = () => {
   } | null>(null);
   const [isSavingAIConfig, setIsSavingAIConfig] = useState(false);
   const [testingPageIds, setTestingPageIds] = useState<string[]>([]);
+  const [checkingPermissionsPageIds, setCheckingPermissionsPageIds] = useState<string[]>([]);
 
   const [mcpConfig, setMcpConfig] = useState<McpConfigState>(() => getSavedMcpConfig());
   const [backendRouteStatus, setBackendRouteStatus] = useState<BackendRouteStatus>('unknown');
@@ -322,6 +235,7 @@ export const SettingsPage: React.FC = () => {
         const loadedPages = normalizeFacebookPages(settings);
 
         setInputFbAppId(settings.appId || '');
+        setInputFbAppSecret((settings as any).appSecret || '');
         setInputFbAccessToken('');
         setInputFbPageId('');
         setInputFbPageName('');
@@ -445,16 +359,18 @@ export const SettingsPage: React.FC = () => {
 
     setFacebookPages(prev => {
       const existingPageIndex = prev.findIndex(page => page.id === pageId);
-      const nextPages = [...prev];
 
-      const nextPage: ManagedFacebookPage = {
+      const nextPage: ConfiguredFacebookPage = {
         id: pageId,
-        name: pageName,
+        name: pageName || '',
         accessToken,
+        access_token: accessToken,
         isDefault: prev.length === 0,
         status: 'unknown',
         aiAgentContext: '',
       };
+
+      const nextPages: ConfiguredFacebookPage[] = [...prev];
 
       if (existingPageIndex >= 0) {
         nextPages[existingPageIndex] = {
@@ -476,7 +392,7 @@ export const SettingsPage: React.FC = () => {
   }, [inputFbAccessToken, inputFbPageId, inputFbPageName]);
 
   const handleUpdateFacebookPage = useCallback(
-    (index: number, updates: Partial<ManagedFacebookPage>) => {
+    (index: number, updates: Partial<ConfiguredFacebookPage>) => {
       setFacebookPages(prev => {
         const updatedPages = prev.map((page, pageIndex) =>
           pageIndex === index
@@ -531,6 +447,100 @@ export const SettingsPage: React.FC = () => {
     setMainAppLoginStatus('unknown');
     setConnectedPageName(null);
   }, []);
+
+  const buildFacebookSettingsPayload = useCallback(
+    (pagesToSave: ConfiguredFacebookPage[]): Partial<MultiPageFacebookSettings> => {
+      const cleanedPages = sanitizeFacebookPages(pagesToSave);
+      const defaultPage = cleanedPages.find(page => page.isDefault) || cleanedPages[0];
+      const pageContexts = cleanedPages.reduce<Record<string, string>>((acc, page) => {
+        if (page.aiAgentContext?.trim()) {
+          acc[page.id] = page.aiAgentContext;
+        }
+        return acc;
+      }, {});
+      const defaultPageToken = defaultPage ? getFacebookPageAccessToken(defaultPage) : '';
+
+      return {
+        appId: inputFbAppId.trim(),
+        appSecret: inputFbAppSecret.trim(),
+        accessToken: defaultPageToken || '',
+        pageId: defaultPage?.id || '',
+        pageName: defaultPage?.name || '',
+        defaultPageId: defaultPage?.id || '',
+        pages: cleanedPages,
+        pageContexts,
+        aiAgentContext: defaultPage?.aiAgentContext || aiAgentContext,
+      };
+    },
+    [aiAgentContext, inputFbAppId, inputFbAppSecret]
+  );
+
+  const handleCheckPagePermissions = useCallback(async (index: number) => {
+    const page = facebookPages[index];
+    if (!page) return;
+
+    setCheckingPermissionsPageIds(prev => [...new Set([...prev, page.id])]);
+
+    try {
+      const response = await fetch('http://localhost:3001/facebook/debug-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          inputToken: page.accessToken,
+          appId: inputFbAppId.trim(),
+          appSecret: inputFbAppSecret.trim(),
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setFbActionMessage({
+          type: 'error',
+          text: result.message || 'Failed to inspect token permissions.',
+        });
+        return;
+      }
+
+      const scopes: FacebookPermissionKey[] = (result.data?.scopes || []) as FacebookPermissionKey[];
+      const features = buildFacebookPageFeatures(scopes);
+      const updatedPages = sanitizeFacebookPages(
+        facebookPages.map((item, pageIndex) =>
+          pageIndex === index
+            ? {
+                ...item,
+                permissions: scopes,
+                features,
+                status: features.canManageMessenger ? 'connected' : item.status || 'unknown',
+              }
+            : item
+        )
+      );
+
+      setFacebookPages(updatedPages);
+
+      if (inputFbAppId.trim()) {
+        await dbSaveFacebookSettings(
+          buildFacebookSettingsPayload(updatedPages) as Partial<FacebookSettings>
+        );
+      }
+
+      setFbActionMessage({
+        type: 'success',
+        text: result.data?.warning
+          ? `Permissions loaded and saved (${result.data.warning})`
+          : `Loaded and saved ${scopes.length} permission(s) for ${page.name || page.id}.`,
+      });
+    } catch (error: any) {
+      console.error('Permission check failed:', error);
+      setFbActionMessage({
+        type: 'error',
+        text: `Permission check failed: ${error?.message || 'Unknown error'}`,
+      });
+    } finally {
+      setCheckingPermissionsPageIds(prev => prev.filter(pid => pid !== page.id));
+    }
+  }, [buildFacebookSettingsPayload, facebookPages, inputFbAppId, inputFbAppSecret]);
 
   const handleTestFacebookPage = useCallback(async (index: number) => {
     const page = facebookPages[index];
@@ -595,31 +605,13 @@ export const SettingsPage: React.FC = () => {
     }
 
     const cleanedPages = sanitizeFacebookPages(facebookPages);
-    const defaultPage = cleanedPages.find(page => page.isDefault) || cleanedPages[0];
-    const pageContexts = cleanedPages.reduce<Record<string, string>>((acc, page) => {
-      if (page.aiAgentContext?.trim()) {
-        acc[page.id] = page.aiAgentContext;
-      }
-      return acc;
-    }, {});
 
     setIsSavingConfig(true);
     setFbActionMessage(null);
 
     try {
-      const newSettingsData: Partial<MultiPageFacebookSettings> = {
-        appId: inputFbAppId.trim(),
-        accessToken: defaultPage?.accessToken || '',
-        pageId: defaultPage?.id || '',
-        pageName: defaultPage?.name || '',
-        defaultPageId: defaultPage?.id || '',
-        pages: cleanedPages,
-        pageContexts,
-        aiAgentContext: defaultPage?.aiAgentContext || aiAgentContext,
-      };
-
       const savedSettings = (await dbSaveFacebookSettings(
-        newSettingsData as Partial<FacebookSettings>
+        buildFacebookSettingsPayload(cleanedPages) as Partial<FacebookSettings>
       )) as MultiPageFacebookSettings;
 
       const savedPages = normalizeFacebookPages(savedSettings);
@@ -636,7 +628,7 @@ export const SettingsPage: React.FC = () => {
   }, [
     inputFbAppId,
     facebookPages,
-    aiAgentContext,
+    buildFacebookSettingsPayload,
   ]);
 
   const handleSaveAIConfig = useCallback(async () => {
@@ -709,6 +701,7 @@ Respond only with the message text.
               id: inputFbPageId,
               name: inputFbPageName,
               accessToken: inputFbAccessToken,
+              access_token: inputFbAccessToken,
               isDefault: true,
               status: 'unknown',
             },
@@ -744,7 +737,7 @@ Respond only with the message text.
         result: PromiseSettledResult<T>
       ): result is PromiseFulfilledResult<T> => result.status === 'fulfilled';
 
-      const connectedPages: ManagedFacebookPage[] = results
+      const connectedPages: ConfiguredFacebookPage[] = results
         .filter(isFulfilled)
         .map(result => result.value);
 
@@ -859,6 +852,16 @@ Respond only with the message text.
                   disabled={isSavingConfig || isFbProcessing}
                 />
 
+                <Input
+                  id="fbAppSecretInput"
+                  label="APP_SECRET"
+                  value={inputFbAppSecret}
+                  onChange={e => setInputFbAppSecret(e.target.value)}
+                  disabled={isSavingConfig || isFbProcessing}
+                  type="password"
+                  placeholder="Your Facebook App Secret"
+                />
+
                 <div className="p-4 neo-border-sm bg-neo-muted space-y-4">
                   <p className="text-[10px] font-black uppercase tracking-widest">ADD_FACEBOOK_PAGE</p>
                   <Input
@@ -867,7 +870,7 @@ Respond only with the message text.
                     value={inputFbPageName}
                     onChange={e => setInputFbPageName(e.target.value)}
                     disabled={isSavingConfig || isFbProcessing}
-                    placeholder="Example: Droplets of Nature"
+                    placeholder="Example: Fleur Sauvage"
                   />
                   <Input
                     id="fbPageIdInput"
@@ -958,12 +961,52 @@ Respond only with the message text.
                             id={`fbPageAccessToken-${index}`}
                             label="PAGE_ACCESS_TOKEN"
                             value={page.accessToken}
-                            onChange={e => handleUpdateFacebookPage(index, { accessToken: e.target.value })}
+                            onChange={e => handleUpdateFacebookPage(index, { accessToken: e.target.value, access_token: e.target.value })}
                             disabled={isSavingConfig || isFbProcessing}
                             type="password"
                           />
 
-                          <div className="grid md:grid-cols-3 gap-2">
+                          {/* Feature Flags from Permissions */}
+                          {page.features && (
+                            <div className="p-3 neo-border-sm bg-neo-muted">
+                              <p className="text-[9px] font-black uppercase tracking-widest mb-2 opacity-60">FEATURE_ACCESS</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {([
+                                  { key: 'canReadPage', label: 'READ_PAGE' },
+                                  { key: 'canPublishPosts', label: 'PUBLISH_POSTS' },
+                                  { key: 'canManageMessenger', label: 'MESSENGER' },
+                                  { key: 'canReadAnalytics', label: 'ANALYTICS' },
+                                  { key: 'canReadLeads', label: 'LEADS' },
+                                  { key: 'canManageInstagram', label: 'INSTAGRAM' },
+                                  { key: 'canManageCatalog', label: 'CATALOG' },
+                                  { key: 'canReadAds', label: 'ADS_READ' },
+                                  { key: 'canManageAds', label: 'ADS_MANAGE' },
+                                ] as { key: keyof NonNullable<typeof page.features>; label: string }[]).map(({ key, label }) => (
+                                  <span
+                                    key={key}
+                                    className={`text-[8px] font-black px-1.5 py-0.5 neo-border-sm uppercase ${
+                                      page.features![key]
+                                        ? 'bg-neo-secondary text-neo-black'
+                                        : 'bg-white text-neo-black/40 line-through'
+                                    }`}
+                                  >
+                                    {label}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid md:grid-cols-4 gap-2">
+                            <Button
+                              onClick={() => handleCheckPagePermissions(index)}
+                              variant="secondary"
+                              size="sm"
+                              isLoading={checkingPermissionsPageIds.includes(page.id)}
+                              disabled={isSavingConfig || isFbProcessing || !page.id.trim() || !page.accessToken.trim()}
+                            >
+                              PERMISSIONS
+                            </Button>
                             <Button
                               onClick={() => handleTestFacebookPage(index)}
                               variant="secondary"

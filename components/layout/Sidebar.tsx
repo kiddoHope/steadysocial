@@ -38,13 +38,14 @@ const Sidebar: React.FC = () => {
         <NavItem to="/dashboard" icon="fa-tachometer-alt" label="DASHBOARD" />
         <NavItem to="/board/default" icon="fa-th-large" label="BOARD" />
         <NavItem to="/marketing-os" icon="fa-rocket" label="MARKETING_OS" />
+        <NavItem to="/crm" icon="fa-users" label="CRM" />
         <NavItem to="/campaign-planner" icon="fa-bullhorn" label="CAMPAIGNS" />
         <NavItem to="/planning" icon="fa-scroll" label="PLAN_WORKSPACE" />
         <NavItem to="/facebook-scheduler" icon="fa-calendar-alt" label="SCHEDULER" />
         <NavItem to="/messaging" icon="fa-comments" label="MESSAGING" />
         <NavItem to="/generate" icon="fa-magic" label="CANVAS_GEN" /> 
         <NavItem to="/presentation" icon="fa-sliders-h" label="PRESENTATIONS" />
-        <NavItem to="/analytics" icon="fa-chart-line" label="ANALYTICS" />
+        {/* <NavItem to="/analytics" icon="fa-chart-line" label="ANALYTICS" /> */}
         <NavItem to="/settings" icon="fa-cog" label="SETTINGS" />
         <NavItem to="/hr" icon="fa-users-cog" label="ADMIN_CORE" />
         <NavItem to="/about" icon="fa-info-circle" label="ABOUT_PROTOCOL" />

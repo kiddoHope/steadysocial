@@ -53,7 +53,7 @@ export interface SchedulerHistoryEntry {
     text: string;
     time: string;
     page: string;
-    status: 'PUBLISHED' | 'SCHEDULED' | 'PENDING' | 'DUE' | 'COMPLETE';
+    status: 'PUBLISHED' | 'SCHEDULED' | 'PENDING' | 'DUE' | 'COMPLETE' | 'DRAFT';
     recordedAt?: number;
     // Expanded Orchestration fields
     type?: 'POST' | 'TASK' | 'IMPLEMENTATION';

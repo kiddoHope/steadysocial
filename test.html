@@ -1,473 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>What is an AI Agent & Its Origins</title>
-  
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@700&family=Patrick+Hand&display=swap" rel="stylesheet">
-  
-  <script src="https://cdn.tailwindcss.com"></script>
-  
-  <script src="https://unpkg.com/lucide@latest"></script>
-
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            paper: '#fdfbf7',
-            pencil: '#2d2d2d',
-            mutedPaper: '#e5e0d8',
-            accentRed: '#ff4d4d',
-            accentBlue: '#2d5da1',
-            postIt: '#fff9c4',
-          },
-          fontFamily: {
-            heading: ['Kalam', 'cursive'],
-            body: ['Patrick Hand', 'cursive'],
-          }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini GTA - Three.js</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #instructions {
+            position: absolute;
+            top: 10px; left: 10px;
+            background: rgba(0,0,0,0.5);
+            color: white; padding: 10px;
+            border-radius: 5px;
         }
-      }
-    }
-  </script>
-
-  <style>
-    /* Hand-Drawn Custom Global Styles */
-    body {
-      background-color: #fdfbf7;
-      background-image: radial-gradient(#e5e0d8 1.5px, transparent 1.5px);
-      background-size: 24px 24px;
-      color: #2d2d2d;
-      font-family: 'Patrick Hand', cursive;
-      overflow-x: hidden;
-    }
-
-    /* Core Wobbly Border Variants */
-    .wobbly-border-1 {
-      border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
-    }
-    .wobbly-border-2 {
-      border-radius: 20px 255px 12px 225px / 225px 15px 255px 12px;
-    }
-    .wobbly-border-postit {
-      border-radius: 12px 15px 30px 12px / 20px 25px 12px 35px;
-    }
-    .wobbly-circle {
-      border-radius: 48% 52% 45% 55% / 51% 47% 53% 49%;
-    }
-
-    /* Hard Shadows Rules */
-    .hard-shadow {
-      box-shadow: 5px 5px 0px 0px #2d2d2d;
-    }
-    .hard-shadow-lg {
-      box-shadow: 9px 9px 0px 0px #2d2d2d;
-    }
-    .hard-shadow-sm {
-      box-shadow: 3px 3px 0px 0px #2d2d2d;
-    }
-    .hard-shadow-postit {
-      box-shadow: 6px 6px 0px 0px rgba(45,45,45,0.15);
-    }
-
-    /* Custom Snappy Sketch Animations */
-    @keyframes scribble-jiggle {
-      0% { transform: rotate(-1deg) translate(0px, 0px); }
-      50% { transform: rotate(1.5deg) translate(1px, -1px); }
-      100% { transform: rotate(-0.5deg) translate(-1px, 1px); }
-    }
-    .jiggle-hover:hover {
-      animation: scribble-jiggle 0.3s infinite alternate;
-    }
-
-    /* Presentation Slide Transitions */
-    .slide {
-      display: none;
-      opacity: 0;
-      transform: scale(0.98) rotate(0.5deg);
-      transition: opacity 0.25s ease-in-out, transform 0.25s ease-in-out;
-    }
-    .slide.active {
-      display: flex;
-      opacity: 1;
-      transform: scale(1) rotate(0deg);
-    }
-  </style>
+    </style>
 </head>
-<body class="min-h-screen flex flex-col justify-between p-4 md:p-8 select-none">
-
-  <header class="w-full max-w-5xl mx-auto flex justify-between items-center mb-4 z-40">
-    <div class="flex items-center space-x-2 border-[3px] border-pencil bg-white px-4 py-1.5 wobbly-border-1 hard-shadow-sm -rotate-1">
-      <i data-lucide="cpu" class="stroke-accentBlue" stroke-width="2.5"></i>
-      <span class="font-heading font-bold text-xl text-pencil tracking-wide">Notebook.AI</span>
+<body>
+    <div id="instructions">
+        <b>WASD</b> to Drive | <b>Space</b> to Brake
     </div>
-    
-    <div class="flex items-center space-x-2 bg-white/80 p-2 border-2 border-dashed border-pencil wobbly-border-2" id="progress-dots">
-      </div>
-  </header>
 
-  <main class="flex-grow w-full max-w-5xl mx-auto flex items-center justify-center relative my-4">
-    
-    <section id="slide-1" class="slide active w-full flex-col items-center justify-center text-center py-8 relative">
-      <div class="absolute -top-6 bg-zinc-400/30 w-36 h-10 border-x border-dashed border-pencil/30 rotate-3 z-10"></div>
-      
-      <div class="bg-white border-4 border-pencil p-8 md:p-12 wobbly-border-1 hard-shadow-lg max-w-3xl w-full relative bg-cover transform -rotate-1">
-        <div class="absolute -top-10 -right-6 hidden md:block animate-bounce text-accentRed" style="animation-duration: 4s;">
-          <svg width="80" height="80" viewBox="0 0 100 100" fill="none" class="stroke-current" stroke-width="3">
-            <path d="M10,50 C20,20 80,10 90,45 C100,80 30,95 15,70 C5,50 45,30 75,40" />
-          </svg>
-          <span class="absolute top-6 left-6 font-heading text-sm text-pencil rotate-12">Wow!</span>
-        </div>
+    <!-- Load Three.js from CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 
-        <span class="bg-accentBlue text-white text-lg md:text-xl px-4 py-1 wobbly-border-2 inline-block mb-4 -rotate-2 font-body hard-shadow-sm">
-          💡 Interactive Presentation
-        </span>
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb); // Sky blue
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+        sunLight.position.set(10, 20, 10);
+        scene.add(sunLight);
+
+        // --- WORLD OBJECTS ---
+        // Ground (The City Floor)
+        const floorGeometry = new THREE.PlaneGeometry(500, 500);
+        const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // Simple Buildings (Randomly placed)
+        for (let i = 0; i < 50; i++) {
+            const h = Math.random() * 10 + 2;
+            const buildingGeo = new THREE.BoxGeometry(4, h, 4);
+            const buildingMat = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+            const building = new THREE.Mesh(buildingGeo, buildingMat);
+            building.position.set(Math.random() * 100 - 50, h/2, Math.random() * 100 - 50);
+            scene.add(building);
+        }
+
+        // --- THE CAR ---
+        const carGroup = new THREE.Group();
         
-        <h1 class="font-heading text-5xl md:text-7xl font-bold text-pencil leading-tight mb-6">
-          What is an <span class="relative inline-block px-2 text-accentRed">AI Agent<svg class="absolute inset-0 w-full h-full stroke-accentRed" viewBox="0 0 100 100" preserveAspectRatio="none" fill="none" stroke-width="2"><path d="M0,90 Q50,95 100,85 M0,85 Q50,75 100,80" stroke-dasharray="2 2"/></svg></span> & Its Origins?
-        </h1>
-        
-        <p class="text-xl md:text-2xl text-pencil/80 font-body max-w-xl mx-auto mb-8">
-          A handwritten exploration of autonomous software brains, active feedback loops, and where they scrambled from!
-        </p>
-        
-        <div class="border-t-2 border-dashed border-mutedPaper pt-6 flex flex-wrap justify-center gap-6 text-md md:text-lg">
-          <span class="text-pencil"><strong class="font-heading">Author:</strong> Sketched by AI Expert</span>
-          <span class="text-pencil"><strong class="font-heading">Era:</strong> 1950 &rarr; 2026</span>
-        </div>
-      </div>
-      
-      <div class="absolute bottom-[-20px] left-1/3 hidden md:block text-pencil/60">
-        <svg width="60" height="60" viewBox="0 0 100 100" fill="none" class="stroke-current" stroke-width="2.5" stroke-dasharray="4 4">
-          <path d="M10,10 Q40,50 80,60" />
-          <path d="M65,62 L82,61 L78,45" />
-        </svg>
-        <span class="font-body text-sm italic">Click Next to start!</span>
-      </div>
-    </section>
+        // Car Body
+        const bodyGeo = new THREE.BoxGeometry(2, 1, 4);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = 0.6;
+        carGroup.add(body);
 
-    <section id="slide-2" class="slide w-full flex-col justify-center items-center py-4">
-      <div class="w-full grid md:grid-cols-5 gap-6 items-center">
-        <div class="md:col-span-3 space-y-4">
-          <h2 class="font-heading text-4xl md:text-5xl font-bold text-pencil flex items-center gap-3">
-            <span class="p-2 border-2 border-pencil wobbly-circle bg-postIt inline-flex items-center justify-center w-12 h-12"><i data-lucide="help-circle" class="stroke-pencil"></i></span>
-            The Core Concept
-          </h2>
-          <div class="bg-white border-[3px] border-pencil p-6 wobbly-border-2 hard-shadow text-xl space-y-4">
-            <p class="font-body leading-relaxed">
-              An <strong class="text-accentBlue font-heading text-2xl">AI Agent</strong> isn't just a passive generator or static chatbot responding to inputs. It is an autonomous entity capable of <span class="bg-postIt px-1.5 py-0.5 border border-dashed border-pencil">perceiving its environment</span>, making decisions, and executing multi-step actions to achieve distinct goals.
-            </p>
-            <blockquote class="border-l-4 border-accentRed pl-4 italic bg-mutedPaper/30 py-2 pr-2 wobbly-border-1">
-              "If standard GenAI is an engine, an AI Agent is the entire vehicle, equipped with a GPS, map, and automated steering wheel."
-            </blockquote>
-          </div>
-        </div>
+        // Car Cabin (Glass)
+        const cabinGeo = new THREE.BoxGeometry(1.5, 0.8, 1.5);
+        const cabinMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+        const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+        cabin.position.set(0, 1.4, -0.2);
+        carGroup.add(cabin);
 
-        <div class="md:col-span-2 bg-postIt border-[3px] border-pencil p-6 wobbly-border-postit hard-shadow rotate-2 relative">
-          <div class="absolute -top-4 left-6 bg-zinc-500/20 px-4 py-1 border border-pencil text-sm -rotate-3 font-heading">
-            📌 THE VISCERAL LOOP
-          </div>
-          <h3 class="font-heading text-2xl text-center mb-4 mt-2 border-b border-pencil/30 pb-2">The Agentic Cycle</h3>
-          
-          <div class="space-y-3 font-body text-lg">
-            <div class="flex items-center gap-3 bg-white p-2 border-2 border-pencil wobbly-border-1">
-              <span class="w-8 h-8 rounded-full bg-accentRed text-white flex items-center justify-center font-heading">1</span>
-              <div><strong>Perceive:</strong> Gathers sensors/data environment logs</div>
-            </div>
-            <div class="flex items-center gap-3 bg-white p-2 border-2 border-pencil wobbly-border-2">
-              <span class="w-8 h-8 rounded-full bg-accentBlue text-white flex items-center justify-center font-heading">2</span>
-              <div><strong>Reason:</strong> Brain breaks goals down into paths</div>
-            </div>
-            <div class="flex items-center gap-3 bg-white p-2 border-2 border-pencil wobbly-border-1">
-              <span class="w-8 h-8 rounded-full bg-pencil text-white flex items-center justify-center font-heading">3</span>
-              <div><strong>Act:</strong> Executes via external tools/API scripts</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+        scene.add(carGroup);
 
-    <section id="slide-3" class="slide w-full flex-col justify-center py-4">
-      <h2 class="font-heading text-4xl md:text-5xl font-bold text-pencil mb-6 text-center">
-        The Sketchy Timeline of Origins ⏳
-      </h2>
-      
-      <div class="grid md:grid-cols-3 gap-6 relative">
-        <div class="absolute inset-x-0 top-1/2 h-1 border-t-2 border-dashed border-pencil/30 -translate-y-1/2 z-0 hidden md:block"></div>
+        // --- PHYSICS VARIABLES ---
+        let velocity = 0;
+        let rotation = 0;
+        const keys = {};
+        const maxSpeed = 0.5;
+        const acceleration = 0.01;
+        const friction = 0.98;
 
-        <div class="bg-white border-2 border-pencil p-5 wobbly-border-1 hard-shadow jiggle-hover z-10 transform -rotate-1">
-          <div class="font-heading text-accentRed text-xl mb-1">1950s: Cybernetics Foundations</div>
-          <p class="font-body text-md text-pencil/90">
-            <strong>Alan Turing</strong> posits the Imitation Game. Early computer pioneers build structural feedback loops inspired by biological nervous systems.
-          </p>
-          <div class="mt-3 text-xs bg-mutedPaper border border-pencil px-2 py-0.5 inline-block wobbly-border-2">
-            Keyword: Feedback Loops
-          </div>
-        </div>
+        window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
 
-        <div class="bg-white border-2 border-pencil p-5 wobbly-border-2 hard-shadow jiggle-hover z-10 transform rotate-1">
-          <div class="font-heading text-accentBlue text-xl mb-1">1990s: Rational Agents Definition</div>
-          <p class="font-body text-md text-pencil/90">
-            Russell & Norvig publish AI standard text explicitly framing artificial intelligence as the study of **Rational Agents** reacting optimally to environments.
-          </p>
-          <div class="mt-3 text-xs bg-postIt border border-pencil px-2 py-0.5 inline-block wobbly-border-1">
-            Keyword: Rule-Based Logic
-          </div>
-        </div>
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
 
-        <div class="bg-white border-[3px] border-pencil p-5 wobbly-border-1 hard-shadow-lg jiggle-hover z-10 transform -rotate-2 bg-gradient-to-br from-white to-orange-50">
-          <div class="font-heading text-pencil text-xl mb-1 flex items-center gap-1">
-            2020s: LLM-Driven ReAct <span class="text-accentRed">🚀</span>
-          </div>
-          <p class="font-body text-md text-pencil/90">
-            Large Language Models emerge as the reasoning core. Papers like **ReAct** (Reason+Act) unleash agents using web browsing, terminal compilation, and custom tooling.
-          </p>
-          <div class="mt-3 text-xs bg-accentRed text-white px-2 py-0.5 inline-block wobbly-border-2">
-            Keyword: Tool Use & Planning
-          </div>
-        </div>
-      </div>
-    </section>
+            // Driving Logic
+            if (keys['w']) velocity += acceleration;
+            if (keys['s']) velocity -= acceleration;
+            if (keys[' ']) velocity *= 0.9; // Brake
 
-    <section id="slide-4" class="slide w-full flex-col justify-center py-4">
-      <div class="grid md:grid-cols-5 gap-6 items-center">
-        
-        <div class="md:col-span-2 space-y-4">
-          <h2 class="font-heading text-4xl font-bold text-pencil leading-tight">
-            Data Proof: Why Agents Matter
-          </h2>
-          <p class="font-body text-lg text-pencil/80">
-            Data compiled across benchmark evaluations highlights the stark contrast between a standard single-prompt LLM generation versus an active Multi-Turn Agentic framework.
-          </p>
-          <div class="p-4 bg-mutedPaper/40 border border-dashed border-pencil wobbly-border-1 text-md">
-            <i data-lucide="info" class="inline stroke-accentBlue mr-1" id="info-ico"></i>
-            <strong>Insight:</strong> Iterative execution and self-correction code pathways yield an exponential lift in intricate logic execution profiles.
-          </div>
-        </div>
+            // Apply Friction
+            velocity *= friction;
 
-        <div class="md:col-span-3 bg-white border-4 border-pencil p-6 wobbly-border-1 hard-shadow relative">
-          <div class="absolute top-2 right-4 font-heading text-xs text-pencil/40 transform rotate-6">Dataset: HumanEval 2024-2026</div>
-          <h3 class="font-heading text-xl text-pencil mb-6 text-center underline decoration-wavy decoration-accentRed">
-            Complex Engineering Task Accuracy (%)
-          </h3>
+            // Steering
+            if (Math.abs(velocity) > 0.01) {
+                const steerSpeed = 0.03 * (velocity > 0 ? 1 : -1);
+                if (keys['a']) rotation += steerSpeed;
+                if (keys['d']) rotation -= steerSpeed;
+            }
 
-          <div class="space-y-6 font-body text-lg relative">
+            // Update Car Position/Rotation
+            carGroup.rotation.y = rotation;
+            carGroup.position.x += Math.sin(rotation) * velocity;
+            carGroup.position.z += Math.cos(rotation) * velocity;
+
+            // --- CAMERA FOLLOW (Third Person) ---
+            const relativeCameraOffset = new THREE.Vector3(0, 5, -10); // Position behind car
+            const cameraOffset = relativeCameraOffset.applyMatrix4(carGroup.matrixWorld);
             
-            <div>
-              <div class="flex justify-between mb-1">
-                <span>Standard Zero-Shot LLM Prompt</span>
-                <span class="font-bold text-pencil">48% Accuracy</span>
-              </div>
-              <div class="w-full bg-mutedPaper h-8 border-2 border-pencil wobbly-border-2 overflow-hidden">
-                <div class="bg-zinc-400 h-full border-r-2 border-pencil transition-all duration-1000" style="width: 48%;"></div>
-              </div>
-            </div>
+            camera.position.x = carGroup.position.x + cameraOffset.x;
+            camera.position.y = carGroup.position.y + cameraOffset.y;
+            camera.position.z = carGroup.position.z + cameraOffset.z;
+            camera.lookAt(carGroup.position);
 
-            <div>
-              <div class="flex justify-between mb-1">
-                <span>Agentic Iteration (Single Agent + Tools)</span>
-                <span class="font-bold text-accentBlue">74% Accuracy</span>
-              </div>
-              <div class="w-full bg-mutedPaper h-8 border-2 border-pencil wobbly-border-1 overflow-hidden">
-                <div class="bg-accentBlue h-full border-r-2 border-pencil transition-all duration-1000" style="width: 74%;"></div>
-              </div>
-            </div>
-
-            <div>
-              <div class="flex justify-between mb-1">
-                <span>Multi-Agent Discussion Framework</span>
-                <span class="font-bold text-accentRed text-xl">91% Accuracy ✨</span>
-              </div>
-              <div class="w-full bg-mutedPaper h-8 border-2 border-pencil wobbly-border-2 overflow-hidden">
-                <div class="bg-accentRed h-full border-r-2 border-pencil transition-all duration-1000" style="width: 91%;"></div>
-              </div>
-            </div>
-
-          </div>
-
-          <div class="mt-4 pt-2 border-t-2 border-dashed border-pencil flex justify-between text-xs font-heading text-pencil/60">
-            <span>0% (Guessed)</span>
-            <span>50% (Average)</span>
-            <span>100% (Perfect Code)</span>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <section id="slide-5" class="slide w-full flex-col justify-center py-4">
-      <h2 class="font-heading text-4xl font-bold text-pencil mb-4 text-center">
-        Anatomy of Modern Agent Types
-      </h2>
-      
-      <div class="overflow-x-auto bg-white border-[3px] border-pencil wobbly-border-1 hard-shadow-lg p-4">
-        <table class="w-full text-left border-collapse font-body text-xl">
-          <thead>
-            <tr class="border-b-4 border-pencil text-pencil font-heading text-2xl">
-              <th class="p-3">Agent Family</th>
-              <th class="p-3">Core Engine</th>
-              <th class="p-3">Primary Use-Case</th>
-              <th class="p-3 text-center">Risk Factor</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y-2 divide-dashed divide-pencil/20">
-            <tr class="hover:bg-postIt/40 transition-colors">
-              <td class="p-3 font-heading text-accentBlue text-lg">Simple Reflex</td>
-              <td class="p-3">Condition-Action Rules</td>
-              <td class="p-3">Basic customer triage & macro routers</td>
-              <td class="p-3 text-center"><span class="px-2 py-0.5 bg-zinc-200 border border-pencil text-sm wobbly-border-1">Low</span></td>
-            </tr>
-            <tr class="hover:bg-postIt/40 transition-colors">
-              <td class="p-3 font-heading text-accentBlue text-lg">Goal-Based / RAG</td>
-              <td class="p-3">Vector Search + Plan Parsing</td>
-              <td class="p-3">Complex enterprise information retrieval</td>
-              <td class="p-3 text-center"><span class="px-2 py-0.5 bg-yellow-200 border border-pencil text-sm wobbly-border-2">Medium</span></td>
-            </tr>
-            <tr class="hover:bg-postIt/40 transition-colors">
-              <td class="p-3 font-heading text-accentBlue text-lg">Autonomous Multi-Agent</td>
-              <td class="p-3">Hierarchical LLM Swarms</td>
-              <td class="p-3">Full-stack software engineering / Devops pipelines</td>
-              <td class="p-3 text-center"><span class="px-2 py-0.5 bg-red-200 border border-pencil text-sm wobbly-border-1 text-accentRed font-bold">High</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      
-      <p class="text-center italic text-pencil/60 mt-4 font-body text-md">
-        * Risk metrics are determined by execution runtime boundaries and allowance of terminal write execution permissions.
-      </p>
-    </section>
-
-    <section id="slide-6" class="slide w-full flex-col items-center justify-center text-center py-6">
-      <div class="bg-postIt border-4 border-pencil p-8 wobbly-border-postit hard-shadow max-w-2xl w-full relative transform rotate-1">
-        <div class="absolute -top-5 left-1/4 bg-zinc-400/30 w-24 h-8 -rotate-6 border-x border-pencil/20"></div>
-        <div class="absolute -top-4 right-1/4 bg-zinc-400/30 w-24 h-8 rotate-12 border-x border-pencil/20"></div>
-
-        <h2 class="font-heading text-4xl md:text-5xl font-bold text-pencil mb-4">
-          The Tomorrow of Autonomous Intelligence 🚀
-        </h2>
-        
-        <p class="font-body text-xl md:text-2xl text-pencil/90 max-w-lg mx-auto mb-6 leading-relaxed">
-          As context frames widen and inference compute costs drop, AI agents are transitioning from digital novelty assistants into full architectural peers.
-        </p>
-
-        <div class="inline-block relative">
-          <button onclick="resetPresentation()" class="wobbly-border-1 border-[3px] border-pencil bg-white font-heading font-bold text-xl px-6 py-2.5 tracking-wide text-pencil hard-shadow hover:bg-accentRed hover:text-white hover:hard-shadow-sm hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100">
-            🔄 Restart Presentation Loop
-          </button>
-        </div>
-      </div>
-    </section>
-
-  </main>
-
-  <footer class="w-full max-w-5xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4 mt-4 pt-4 border-t-2 border-dashed border-pencil/40 z-40">
-    <div class="font-heading text-xl text-pencil/80 transform -rotate-1">
-      Slide Notebook Leaf: <span id="slide-counter" class="text-accentRed underline decoration-wavy">1 / 6</span>
-    </div>
-
-    <div class="flex items-center space-x-4">
-      <button id="prev-btn" onclick="changeSlide(-1)" class="wobbly-border-1 border-[3px] border-pencil bg-white font-body font-bold text-xl px-5 py-2 hard-shadow hover:bg-accentBlue hover:text-white hover:hard-shadow-sm hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100 disabled:opacity-40 disabled:pointer-events-none">
-        &larr; Prev Slide
-      </button>
-      
-      <button id="next-btn" onclick="changeSlide(1)" class="wobbly-border-2 border-[3px] border-pencil bg-white font-body font-bold text-xl px-5 py-2 hard-shadow hover:bg-accentRed hover:text-white hover:hard-shadow-sm hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100">
-        Next Slide &rarr;
-      </button>
-    </div>
-  </footer>
-
-  <script>
-    let currentSlideIndex = 1;
-    const totalSlides = 6;
-
-    function initPresentation() {
-      setupProgressDots();
-      updateSlideDisplay();
-      lucide.createIcons();
-    }
-
-    function setupProgressDots() {
-      const dotContainer = document.getElementById('progress-dots');
-      dotContainer.innerHTML = '';
-      for (let i = 1; i <= totalSlides; i++) {
-        const dot = document.createElement('div');
-        dot.id = `dot-${i}`;
-        dot.className = `w-4 h-4 border border-pencil wobbly-circle transition-all duration-300 ${i === 1 ? 'bg-accentRed scale-110' : 'bg-mutedPaper'}`;
-        dotContainer.appendChild(dot);
-      }
-    }
-
-    function changeSlide(direction) {
-      const nextIndex = currentSlideIndex + direction;
-      if (nextIndex >= 1 && nextIndex <= totalSlides) {
-        currentSlideIndex = nextIndex;
-        updateSlideDisplay();
-      }
-    }
-
-    function resetPresentation() {
-      currentSlideIndex = 1;
-      updateSlideDisplay();
-    }
-
-    function updateSlideDisplay() {
-      // Hide all presentation cards safely
-      for (let i = 1; i <= totalSlides; i++) {
-        const slide = document.getElementById(`slide-${i}`);
-        if (slide) {
-          slide.classList.remove('active');
+            renderer.render(scene, camera);
         }
-        
-        // Handle indicator tracking matrix updates
-        const dot = document.getElementById(`dot-${i}`);
-        if (dot) {
-          if (i === currentSlideIndex) {
-            dot.classList.add('bg-accentRed', 'scale-110');
-            dot.classList.remove('bg-mutedPaper');
-          } else {
-            dot.classList.remove('bg-accentRed', 'scale-110');
-            dot.classList.add('bg-mutedPaper');
-          }
-        }
-      }
 
-      // Activate selected deck slide frame
-      const currentSlide = document.getElementById(`slide-${currentSlideIndex}`);
-      if (currentSlide) {
-        currentSlide.classList.add('active');
-      }
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
 
-      // Sync counter elements texts fields labels
-      document.getElementById('slide-counter').textContent = `${currentSlideIndex} / ${totalSlides}`;
-
-      // Enforce interactive disabled navigation triggers boundaries safely
-      document.getElementById('prev-btn').disabled = (currentSlideIndex === 1);
-      
-      const nextBtn = document.getElementById('next-btn');
-      if (currentSlideIndex === totalSlides) {
-        nextBtn.innerHTML = 'Finish 🎉';
-        nextBtn.onclick = () => alert("Presentation Sketch Concluded! Keep exploring AI Agents!");
-      } else {
-        nextBtn.innerHTML = 'Next Slide &rarr;';
-        nextBtn.onclick = () => changeSlide(1);
-      }
-    }
-
-    // Keyboard Arrow Controls Listeners Hooks
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowRight' || e.key === ' ') {
-        changeSlide(1);
-      } else if (e.key === 'ArrowLeft') {
-        changeSlide(-1);
-      }
-    });
-
-    // Fire Presentation Thread Init lifecycle
-    window.onload = initPresentation;
-  </script>
+        animate();
+    </script>
 </body>
 </html>

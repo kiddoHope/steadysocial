@@ -226,7 +226,20 @@ const ConversationRow = memo(
 
 ConversationRow.displayName = 'ConversationRow';
 
-const FacebookChatsPage: React.FC = () => {
+type FacebookChatsPageProps = {
+  workspaceId?: string;
+  facebookPage?: ConfiguredFacebookPage;
+  facebookPageId?: string;
+  facebookPageName?: string;
+  pageAccessToken?: string | null;
+  businessScopeKey?: string;
+  productScopeKey?: string;
+};
+
+const FacebookChatsPage: React.FC<FacebookChatsPageProps> = ({
+  facebookPage: scopedFacebookPage,
+  pageAccessToken: scopedPageAccessToken,
+}) => {
   const [fbSettings, setFbSettings] = useState<MultiPageFacebookSettings | null>(null);
   const [isLoadingFbSettings, setIsLoadingFbSettings] = useState(true);
   const [fbPages, setFbPages] = useState<ConfiguredFacebookPage[]>([]);
@@ -260,6 +273,30 @@ const FacebookChatsPage: React.FC = () => {
   const registeredLeadConvsRef = useRef<Set<string>>(new Set());
   const [conversationStatesMap, setConversationStatesMap] = useState<Record<string, ConversationState>>({});
 
+  const scopedSelectedPage = useMemo<ConfiguredFacebookPage | null>(() => {
+    if (!scopedFacebookPage) return null;
+
+    const token = scopedPageAccessToken || getFacebookPageAccessToken(scopedFacebookPage) || '';
+
+    return {
+      ...scopedFacebookPage,
+      accessToken: token || scopedFacebookPage.accessToken || '',
+      access_token: token || scopedFacebookPage.access_token || scopedFacebookPage.accessToken || '',
+    };
+  }, [scopedFacebookPage, scopedPageAccessToken]);
+
+  const getResolvedPageAccessToken = useCallback(
+    (page?: (ConfiguredFacebookPage & Partial<FacebookPage>) | FacebookPage | null) => {
+      if (!page) return '';
+      return (
+        getFacebookPageAccessToken(page as ConfiguredFacebookPage) ||
+        (page as FacebookPage).access_token ||
+        ''
+      );
+    },
+    []
+  );
+
   const refreshStatesMap = useCallback(async () => {
     try {
       const states = await chatDbService.getAllConversationStates(selectedPage?.id);
@@ -268,6 +305,17 @@ const FacebookChatsPage: React.FC = () => {
       console.error('Failed to load conversation states map:', err);
     }
   }, [selectedPage?.id]);
+
+  const selectedPageId = selectedPage?.id;
+  const selectedPageAccessToken =
+    scopedPageAccessToken || getResolvedPageAccessToken(selectedPage);
+  const selectedPageContext = getPageAiAgentContext(fbSettings, selectedPage?.id);
+
+  const { fbApi, error: sdkError } = useFacebookSDK(
+    fbSettings?.appId,
+    undefined,
+    selectedPageAccessToken || fbSettings?.accessToken
+  );
 
   const syncLeadToCore = useCallback(async (conversationId: string, details: CustomerDetails) => {
     if (!details.fullName) return;
@@ -278,13 +326,38 @@ const FacebookChatsPage: React.FC = () => {
         (!selectedPage?.id || !l.facebookPageId || l.facebookPageId === selectedPage.id)
       );
 
+      const conversation = conversations.find(c => c.id === conversationId);
+      const otherParticipant = conversation?.participants?.data?.find(
+        participant => String(participant.id) !== String(selectedPage?.id)
+      );
+      const customerPsid = otherParticipant?.id;
+
+      let fbGender = '';
+      if (customerPsid && fbApi && selectedPageAccessToken) {
+        try {
+          const profile = await fbApi<{ gender?: string }>(`/${customerPsid}`, 'get', {
+            fields: 'gender',
+            access_token: selectedPageAccessToken,
+          });
+          if (profile?.gender) {
+            fbGender = profile.gender;
+          }
+        } catch (err) {
+          console.warn('[LeadCore] Failed to fetch profile from FB:', err);
+        }
+      }
+
       const leadData = {
         name: details.fullName,
         phone: details.contactNumber || undefined,
         email: details.email || undefined,
+        address: details.address || undefined,
+        gender: fbGender || (details as any).gender || undefined,
+        age: (details as any).age || undefined,
         notes: [
           selectedPage?.name ? `Facebook Page: ${selectedPage.name}` : undefined,
           details.address ? `Address: ${details.address}` : undefined,
+          fbGender ? `Gender (Meta): ${fbGender}` : undefined,
         ].filter(Boolean).join('\n') || undefined,
         source: 'MESSENGER' as const,
         status: (existingLead?.status || 'NEW') as any,
@@ -304,7 +377,7 @@ const FacebookChatsPage: React.FC = () => {
     } catch (err) {
       console.warn('[LeadCore] Failed to sync lead to Core:', err);
     }
-  }, [selectedPage?.id, selectedPage?.name]);
+  }, [selectedPage?.id, selectedPage?.name, selectedPageAccessToken, conversations, fbApi]);
 
   const [hasProductDb, setHasProductDb] = useState(false);
   const [hasBusinessDb, setHasBusinessDb] = useState(false);
@@ -328,9 +401,6 @@ const FacebookChatsPage: React.FC = () => {
     );
   }, [conversations, selectedConversationId]);
 
-  const selectedPageId = selectedPage?.id;
-  const selectedPageAccessToken = getFacebookPageAccessToken(selectedPage);
-  const selectedPageContext = getPageAiAgentContext(fbSettings, selectedPage?.id);
 
   const isConversationAiEnabled = useCallback(
     (conversationId: string) => {
@@ -354,25 +424,27 @@ const FacebookChatsPage: React.FC = () => {
 
       try {
         const settings = (await dbGetFacebookSettings()) as MultiPageFacebookSettings;
-        const pages = normalizeFacebookPages(settings);
-        const defaultPage = getDefaultFacebookPage(pages, settings);
+        const normalizedPages = normalizeFacebookPages(settings);
+        const defaultPageFromSettings = getDefaultFacebookPage(normalizedPages, settings);
+        const effectiveDefaultPage = scopedSelectedPage || defaultPageFromSettings;
+        const effectivePages = scopedSelectedPage ? [scopedSelectedPage] : normalizedPages;
 
         setFbSettings(settings);
-        setFbPages(pages);
-        setSelectedPage(defaultPage);
-        setIsLoggedIn(pages.length > 0);
+        setFbPages(effectivePages);
+        setSelectedPage(effectiveDefaultPage);
+        setIsLoggedIn(Boolean(effectiveDefaultPage?.id && getResolvedPageAccessToken(effectiveDefaultPage)));
 
         if (!settings.appId) {
           setError('FACEBOOK_APP_ID_MISSING');
         }
 
-        if (pages.length === 0) {
+        if (effectivePages.length === 0) {
           setError('NO_FACEBOOK_PAGES_CONFIGURED');
         }
 
         // Check local DB existence for the selected/default page.
-        await refreshPageDatabases(defaultPage?.id);
-        const states = await chatDbService.getAllConversationStates(defaultPage?.id);
+        await refreshPageDatabases(effectiveDefaultPage?.id);
+        const states = await chatDbService.getAllConversationStates(effectiveDefaultPage?.id);
         setConversationStatesMap(states);
       } catch (err) {
         console.error('Failed to load FB settings for Chats:', err);
@@ -383,13 +455,8 @@ const FacebookChatsPage: React.FC = () => {
     };
 
     loadSettings();
-  }, []);
+  }, [getResolvedPageAccessToken, refreshPageDatabases, scopedSelectedPage]);
 
-  const { fbApi, error: sdkError } = useFacebookSDK(
-    fbSettings?.appId,
-    undefined,
-    selectedPageAccessToken || fbSettings?.accessToken
-  );
 
   useEffect(() => {
     if (sdkError) {
@@ -404,8 +471,10 @@ const FacebookChatsPage: React.FC = () => {
   }, [selectedPage?.id, refreshPageDatabases, refreshStatesMap]);
 
   const fetchConversations = useCallback(
-    async (page: FacebookPage) => {
-      if (!fbApi || !page.access_token) {
+    async (page: (ConfiguredFacebookPage & Partial<FacebookPage>) | FacebookPage) => {
+      const pageToken = getResolvedPageAccessToken(page);
+
+      if (!fbApi || !pageToken) {
         setError('AUTH_TOKEN_MISSING');
         return;
       }
@@ -419,7 +488,7 @@ const FacebookChatsPage: React.FC = () => {
           'get',
           {
             fields: 'participants,snippet,unread_count,updated_time',
-            access_token: page.access_token,
+            access_token: pageToken,
           }
         );
 
@@ -446,12 +515,13 @@ const FacebookChatsPage: React.FC = () => {
         setIsLoadingConversations(false);
       }
     },
-    [fbApi]
+    [fbApi, getResolvedPageAccessToken, refreshStatesMap]
   );
 
   const silentRefreshConversations = useCallback(
-    async (page: FacebookPage) => {
-      if (!fbApi || !page.access_token) return;
+    async (page: (ConfiguredFacebookPage & Partial<FacebookPage>) | FacebookPage) => {
+      const pageToken = getResolvedPageAccessToken(page);
+      if (!fbApi || !pageToken) return;
 
       try {
         const response = await fbApi<{ data: FacebookConversation[] }>(
@@ -459,7 +529,7 @@ const FacebookChatsPage: React.FC = () => {
           'get',
           {
             fields: 'participants,snippet,unread_count,updated_time',
-            access_token: page.access_token,
+            access_token: pageToken,
           }
         );
 
@@ -510,7 +580,7 @@ const FacebookChatsPage: React.FC = () => {
         console.error('Silent conversation refresh failed:', err);
       }
     },
-    [fbApi]
+    [fbApi, getResolvedPageAccessToken, refreshStatesMap]
   );
 
   useEffect(() => {
@@ -654,7 +724,7 @@ const FacebookChatsPage: React.FC = () => {
     } catch (err) {
       console.error('Failed to load conversation state:', err);
     }
-  }, []);
+  }, [selectedPage?.id]);
 
   const handleSendMessage = useCallback(
     async (e?: React.FormEvent, overrideMessage?: string) => {
@@ -684,7 +754,7 @@ const FacebookChatsPage: React.FC = () => {
         return;
       }
 
-      if (!selectedPage?.id || !selectedPage.access_token) {
+      if (!selectedPage?.id || !selectedPageAccessToken) {
         setError('PAGE_AUTH_MISSING');
         return;
       }
@@ -713,7 +783,7 @@ const FacebookChatsPage: React.FC = () => {
           message: JSON.stringify({
             text: cleanMessage,
           }),
-          access_token: selectedPage.access_token,
+          access_token: selectedPageAccessToken,
         });
 
         setNewMessageText('');
@@ -749,6 +819,7 @@ const FacebookChatsPage: React.FC = () => {
       newMessageText,
       selectedConversation,
       selectedPage,
+      selectedPageAccessToken,
     ]
   );
 
@@ -864,7 +935,7 @@ const FacebookChatsPage: React.FC = () => {
       setMatchedProductsPreview(matches);
     };
     getMatches();
-  }, [messages, selectedConversationId]);
+  }, [messages, selectedConversationId, selectedPage?.id]);
 
   useEffect(() => {
     const handleCrmUpdated = (e: any) => {
@@ -1061,6 +1132,12 @@ const FacebookChatsPage: React.FC = () => {
     );
   }
 
+  // Block Messenger access if the selected page doesn't have the required permissions.
+  // Only enforce the block if features have been loaded (permissions check was run).
+  const messengerBlocked = Boolean(
+    selectedPage?.features && !selectedPage.features.canManageMessenger
+  );
+
   return (
     <div className="min-h-full bg-neo-bg p-8 font-space relative overflow-hidden flex flex-col">
       <div className="absolute inset-0 bg-halftone opacity-5 pointer-events-none"></div>
@@ -1106,7 +1183,22 @@ const FacebookChatsPage: React.FC = () => {
           />
         )}
 
-        {isLoggedIn && selectedPage ? (
+        {messengerBlocked ? (
+          <div className="flex-grow flex flex-col items-center justify-center gap-6 text-center">
+            <div className="p-3 neo-border bg-neo-accent text-white inline-block">
+              <i className="fas fa-ban text-3xl" />
+            </div>
+            <div>
+              <p className="text-xl font-black uppercase tracking-tight">MESSENGER_ACCESS_BLOCKED</p>
+              <p className="text-[11px] font-bold opacity-60 uppercase mt-1">
+                {selectedPage?.name || selectedPage?.id} does not have <code>pages_messaging</code> &amp; <code>pages_manage_metadata</code> permissions.
+              </p>
+            </div>
+            <p className="text-[10px] font-bold uppercase opacity-50 max-w-xs">
+              Go to Settings → Check Permissions to verify token scopes, or request the required permissions via Meta App Review.
+            </p>
+          </div>
+        ) : isLoggedIn && selectedPage ? (
           <div className="flex-grow flex gap-8 h-full w-full">
             {/* COLUMN 1: Active Threads */}
             <div className="w-80 flex flex-col gap-6 h-full">
@@ -1217,7 +1309,7 @@ const FacebookChatsPage: React.FC = () => {
                             <div className="absolute inset-0 bg-halftone opacity-5 pointer-events-none"></div>
 
                             <p className="text-xs font-bold leading-relaxed relative z-10 whitespace-pre-wrap">
-                              {message.message}
+                              {message.message || '[Attachment or unsupported message]'}
                             </p>
 
                             <div
@@ -1348,7 +1440,7 @@ const FacebookChatsPage: React.FC = () => {
                             setIsCrmLoading(true);
                             try {
                               let historicalMessages = messages;
-                              if (fbApi && selectedPage?.access_token) {
+                              if (fbApi && selectedPageAccessToken) {
                                 try {
                                   const historyResponse = await fbApi<{ data: FacebookMessage[] }>(
                                     `/${selectedConversation.id}/messages`,
@@ -1356,7 +1448,7 @@ const FacebookChatsPage: React.FC = () => {
                                     {
                                       fields: 'id,created_time,message,from{id,name}',
                                       limit: 150,
-                                      access_token: selectedPage.access_token,
+                                      access_token: selectedPageAccessToken,
                                     }
                                   );
                                   if (historyResponse?.data) {

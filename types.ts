@@ -312,3 +312,58 @@ export interface FBPostsResponse {
 export interface FBManagedPagesResponse {
   data: FacebookPage[];
 }
+
+export type FacebookPermissionKey =
+  | 'pages_show_list'
+  | 'pages_read_engagement'
+  | 'pages_manage_metadata'
+  | 'pages_read_user_content'
+  | 'pages_manage_posts'
+  | 'pages_manage_engagement'
+  | 'publish_video'
+  | 'pages_messaging'
+  | 'pages_messaging_subscriptions'
+  | 'pages_utility_messaging'
+  | 'read_page_mailboxes'
+  | 'read_insights'
+  | 'leads_retrieval'
+  | 'ads_read'
+  | 'ads_management'
+  | 'business_management'
+  | 'pages_manage_ads'
+  | 'catalog_management'
+  | 'instagram_basic'
+  | 'instagram_content_publish'
+  | 'instagram_manage_comments'
+  | 'instagram_manage_insights'
+  | 'instagram_manage_messages';
+
+export interface ManagedFacebookPage {
+  id: string;
+  name?: string;
+  accessToken: string;
+  access_token?: string;
+  isDefault?: boolean;
+  status?: 'unknown' | 'connected' | 'not_authorized' | 'error';
+  lastTestedAt?: string;
+
+  permissions?: FacebookPermissionKey[];
+
+  aiAgentContext?: string;
+  productCatalogId?: string;
+  instagramBusinessAccountId?: string;
+  adAccountId?: string;
+
+  features?: {
+    canReadPage: boolean;
+    canPublishPosts: boolean;
+    canManageMessenger: boolean;
+    canReadAnalytics: boolean;
+    canReadLeads: boolean;
+    canManageInstagram: boolean;
+    canManageCatalog: boolean;
+    canReadAds: boolean;
+    canManageAds: boolean;
+  };
+}
+

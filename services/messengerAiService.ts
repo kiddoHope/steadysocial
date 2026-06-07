@@ -492,6 +492,8 @@ Finally, you MUST append the \`[HANDOFF]\` tag at the absolute end of your respo
 export interface ExtractedCustomerProfile extends CustomerDetails {
   tags?: string[];
   remarks?: string;
+  gender?: string;
+  age?: string;
 }
 
 // --- Customer Details Extractor ---
@@ -506,10 +508,11 @@ You are an expert data extraction assistant. Your task is to analyze the provide
 **Instructions:**
 1.  Read the conversation transcript carefully to find the most recently provided and complete details.
 2.  Identify the customer's full name, contact number (mobile or landline), email address, and complete shipping address.
-3.  Generate relevant short descriptive tags for the conversation (e.g., VIP, hot_lead, skincare, inquiry, ordering, paid, etc.) based on their behavior, interest, and transaction state. Return these as an array of strings in "tags".
-4.  Summarize the customer's current inquiries, orders, preferences, or special notes in a concise sticky note format (e.g., "Interested in Ultra Hydrating Serum. Prefers GCash payment.") for the human agent. Return this in "remarks".
-5.  If a piece of information is not present or cannot be determined from the conversation, the value for that key should be an empty string "" or an empty array [].
-6.  You **MUST** respond with **ONLY** a valid JSON object. Do not include any other text, greetings, explanations, or markdown formatting like \`\`\`json. Your entire response should be the JSON object itself.
+3.  Also look for demographic data: extract the user's age (as a number or string) and gender ("male" or "female" or "") if mentioned explicitly or implicitly in their messages.
+4.  Generate relevant short descriptive tags for the conversation (e.g., VIP, hot_lead, skincare, inquiry, ordering, paid, etc.) based on their behavior, interest, and transaction state. Return these as an array of strings in "tags".
+5.  Summarize the customer's current inquiries, orders, preferences, or special notes in a concise sticky note format (e.g., "Interested in Ultra Hydrating Serum. Prefers GCash payment.") for the human agent. Return this in "remarks".
+6.  If a piece of information is not present or cannot be determined from the conversation, the value for that key should be an empty string "" or an empty array [].
+7.  You **MUST** respond with **ONLY** a valid JSON object. Do not include any other text, greetings, explanations, or markdown formatting like \`\`\`json. Your entire response should be the JSON object itself.
 
 **JSON Output Schema:**
 {
@@ -517,6 +520,8 @@ You are an expert data extraction assistant. Your task is to analyze the provide
   "contactNumber": "string",
   "email": "string",
   "address": "string",
+  "gender": "string",
+  "age": "string",
   "tags": ["string"],
   "remarks": "string"
 }
@@ -554,7 +559,7 @@ You are an expert data extraction assistant. Your task is to analyze the provide
     const endIndex = cleaned.lastIndexOf('}');
 
     if (startIndex === -1 || endIndex === -1) {
-      return { fullName: '', contactNumber: '', email: '', address: '', tags: [], remarks: '' };
+      return { fullName: '', contactNumber: '', email: '', address: '', gender: '', age: '', tags: [], remarks: '' };
     }
 
     const cleanedJsonString = cleaned.substring(startIndex, endIndex + 1);
@@ -565,12 +570,14 @@ You are an expert data extraction assistant. Your task is to analyze the provide
       contactNumber: parsedJson.contactNumber || '',
       email: parsedJson.email || '',
       address: parsedJson.address || '',
+      gender: parsedJson.gender || '',
+      age: parsedJson.age || '',
       tags: parsedJson.tags || [],
       remarks: parsedJson.remarks || '',
     };
   } catch (error) {
     console.error('Error extracting customer details with AI:', error);
-    return { fullName: '', contactNumber: '', email: '', address: '', tags: [], remarks: '' };
+    return { fullName: '', contactNumber: '', email: '', address: '', gender: '', age: '', tags: [], remarks: '' };
   }
 };
 

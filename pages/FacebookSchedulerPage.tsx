@@ -63,7 +63,7 @@ const FacebookSchedulerPage: React.FC = () => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'>('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PUBLISHED' | 'SCHEDULED' | 'PENDING' | 'DUE' | 'COMPLETE'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PUBLISHED' | 'SCHEDULED' | 'PENDING' | 'DUE' | 'COMPLETE' | 'DRAFT'>('ALL');
   const [tagFilter, setTagFilter] = useState<string>('');
 
   // Auto-update states for MCP data sync
@@ -515,6 +515,44 @@ const FacebookSchedulerPage: React.FC = () => {
     }
   };
 
+  const handleDropPost = async (postId: string, targetDate: Date) => {
+    const post = scheduledPosts.find(p => p.id === postId);
+    if (!post) return;
+
+    try {
+      const newDateTime = new Date(post.time || new Date());
+      newDateTime.setFullYear(targetDate.getFullYear());
+      newDateTime.setMonth(targetDate.getMonth());
+      newDateTime.setDate(targetDate.getDate());
+
+      const newTimeISO = newDateTime.toISOString();
+
+      // If it's a live Facebook scheduled post, call Facebook API to reschedule
+      if (post.status === 'SCHEDULED' && (!post.type || post.type === 'POST') && isLoggedIn && selectedPage) {
+        const isLiveFbPost = /^\d+(_\d+)?$/.test(postId);
+        if (isLiveFbPost) {
+          const unixTime = Math.floor(newDateTime.getTime() / 1000);
+          await fbApi(`/${postId}`, 'post', {
+            scheduled_publish_time: unixTime,
+            access_token: selectedPage.access_token,
+          });
+        }
+      }
+
+      const updated = {
+        ...post,
+        time: newTimeISO,
+      };
+
+      const saved = await dbUpdateSchedulerHistory(postId, updated);
+      setScheduledPosts(prev => prev.map(p => p.id === postId ? saved : p));
+      setSuccess(`Rescheduled to ${newDateTime.toLocaleDateString()}`);
+    } catch (err: any) {
+      console.error('Rescheduling failed:', err);
+      setError(`RESCHEDULE_FAILURE: ${err.message}`);
+    }
+  };
+
   // Toggle dynamic milestone checkbox on detail modal
   const handleToggleDetailMilestone = async (milestoneIndex: number) => {
     if (!selectedSchedulerItem) return;
@@ -691,11 +729,9 @@ const FacebookSchedulerPage: React.FC = () => {
     }
   };
 
-  const getTaskStatus = (item: SchedulerHistoryEntry): 'PENDING' | 'DUE' | 'COMPLETE' | 'PUBLISHED' | 'SCHEDULED' => {
-    if (item.type !== 'TASK' && item.type !== 'IMPLEMENTATION') {
-      return item.status;
-    }
+  const getTaskStatus = (item: SchedulerHistoryEntry): 'PENDING' | 'DUE' | 'COMPLETE' | 'PUBLISHED' | 'SCHEDULED' | 'DRAFT' => {
     if (item.status === 'COMPLETE') return 'COMPLETE';
+    if (item.status === 'DRAFT' || (!item.time && item.status !== 'SCHEDULED')) return 'DRAFT';
     const itemTime = new Date(item.time).getTime();
     const now = new Date().getTime();
     if (itemTime < now) {
@@ -969,10 +1005,21 @@ const FacebookSchedulerPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-7 gap-2 border-4 border-neo-black p-2 bg-neo-bg overflow-x-auto min-w-[700px]">
-                    {/* Weekdays */}
-                    {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(day => (
-                      <div key={day} className="bg-neo-black text-white text-xs font-black py-3 text-center border-2 border-neo-black">
+                  {/* Calendar Legend */}
+                  <div className="flex flex-wrap items-center gap-3 mb-3">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-neo-black opacity-60">Legend:</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-neo-secondary border-2 border-neo-black"></span><span className="text-[10px] font-bold uppercase">DRAFT</span></span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-[#4F46E5] border-2 border-neo-black"></span><span className="text-[10px] font-bold uppercase">SCHEDULED</span></span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-[#16A34A] border-2 border-neo-black"></span><span className="text-[10px] font-bold uppercase">PUBLISHED</span></span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-neo-accent border-2 border-neo-black"></span><span className="text-[10px] font-bold uppercase">DUE / OVERDUE</span></span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-[#F59E0B] border-2 border-neo-black"></span><span className="text-[10px] font-bold uppercase">TASK</span></span>
+                    <span className="ml-auto text-[9px] font-black uppercase text-neo-black opacity-40">✦ Drag posts to reschedule</span>
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-0 neo-border overflow-x-auto min-w-[700px]" style={{boxShadow: '6px 6px 0 #000'}}>
+                    {/* Weekdays Header */}
+                    {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((day, i) => (
+                      <div key={day} className={`bg-neo-black text-neo-bg text-[10px] font-black py-3 text-center uppercase tracking-widest ${i < 6 ? 'border-r-2 border-neo-bg/30' : ''}`}>
                         {day}
                       </div>
                     ))}
@@ -980,92 +1027,106 @@ const FacebookSchedulerPage: React.FC = () => {
                     {/* Calendar Days */}
                     {getDaysInMonth(selectedYear, selectedMonth).map((day, index) => {
                       const datePosts = getPostsForDate(day.date);
+                      const col = index % 7;
+                      const row = Math.floor(index / 7);
+                      const totalRows = Math.ceil(getDaysInMonth(selectedYear, selectedMonth).length / 7);
                       return (
                         <div 
                           key={index} 
                           onClick={() => handleDayClick(day.date)}
+                          onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#FFD93D'; }}
+                          onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            (e.currentTarget as HTMLElement).style.background = '';
+                            const id = e.dataTransfer.getData('text/plain');
+                            if (id) handleDropPost(id, day.date);
+                          }}
                           className={`
-                            min-h-[130px] p-3 neo-border-sm bg-white flex flex-col justify-between transition-all duration-150 relative cursor-pointer group
-                            ${day.isCurrentMonth ? 'text-neo-black' : 'bg-neo-bg/40 opacity-40 hover:opacity-80'}
-                            ${day.isToday ? 'bg-neo-secondary/30 ring-4 ring-neo-accent ring-inset' : 'hover:-translate-y-1 hover:neo-shadow-sm'}
+                            min-h-[120px] p-2 flex flex-col relative cursor-pointer transition-colors duration-100
+                            ${col < 6 ? 'border-r-2 border-neo-black' : ''}
+                            ${row < totalRows - 1 ? 'border-b-2 border-neo-black' : ''}
+                            ${!day.isCurrentMonth ? 'bg-[#F5F0E8] opacity-50' : 'bg-neo-bg hover:bg-neo-secondary/20'}
+                            ${day.isToday ? '!bg-neo-secondary' : ''}
                           `}
                         >
-                          <div className="flex justify-between items-start">
-                            <span className={`text-base font-black ${day.isToday ? 'text-neo-accent' : ''}`}>
+                          {/* Date Number */}
+                          <div className="flex justify-between items-start mb-1">
+                            <span className={`text-sm font-black leading-none
+                              ${day.isToday ? 'text-neo-black bg-neo-accent w-6 h-6 flex items-center justify-center border-2 border-neo-black text-[10px]' : 'text-neo-black'}
+                            `}>
                               {day.date.getDate()}
                             </span>
                             {day.isToday && (
-                              <span className="bg-neo-accent text-white text-[8px] font-black px-1.5 py-0.5 neo-border-sm rotate-3">
+                              <span className="bg-neo-black text-neo-bg text-[7px] font-black px-1 py-0.5 uppercase tracking-wider">
                                 TODAY
                               </span>
                             )}
-                            <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-neo-accent font-black">
-                              <i className="fas fa-plus-circle"></i>
-                            </span>
+                            {datePosts.length > 2 && (
+                              <span className="text-[8px] font-black text-neo-black opacity-60">+{datePosts.length}</span>
+                            )}
                           </div>
 
-                          {/* Scheduled Tasks List inside cell */}
-                          <div className="mt-2 space-y-1.5 flex-1 overflow-y-auto max-h-[80px] scrollbar-thin">
+                          {/* Post Badges */}
+                          <div className="space-y-1 flex-1 overflow-y-auto max-h-[75px]">
                             {datePosts.map(post => {
                               const isTask = post.type === 'TASK';
                               const isImp = post.type === 'IMPLEMENTATION';
                               const effectiveStatus = getTaskStatus(post);
-                              const isDone = effectiveStatus === 'COMPLETE' || post.status === 'PUBLISHED';
-                              let badgeColor = 'bg-blue-400 text-white';
+
+                              // Neo-Brutalism post badge styles per state
+                              let badgeBg = '#4F46E5';       // SCHEDULED — indigo
+                              let badgeText = '#FFFFFF';
                               let icon = 'fa-bullhorn';
-                              if (isTask) {
-                                if (effectiveStatus === 'COMPLETE') {
-                                  badgeColor = 'bg-gray-400 text-gray-100 opacity-60';
-                                  icon = 'fa-check-double';
-                                } else if (effectiveStatus === 'DUE') {
-                                  badgeColor = 'bg-red-500 text-white animate-pulse-subtle';
-                                  icon = 'fa-exclamation-triangle';
-                                } else {
-                                  badgeColor = 'bg-green-500 text-white';
-                                  icon = 'fa-check-square';
-                                }
+                              let strikethrough = false;
+
+                              if (post.status === 'PUBLISHED' || effectiveStatus === 'COMPLETE') {
+                                badgeBg = '#16A34A';          // PUBLISHED — green
+                                icon = 'fa-check-double';
+                                strikethrough = post.status === 'PUBLISHED';
+                              } else if (effectiveStatus === 'DUE') {
+                                badgeBg = '#FF6B6B';          // DUE/OVERDUE — red accent
+                                icon = 'fa-exclamation';
+                              } else if (post.status === 'DRAFT' || (!post.time && post.status !== 'SCHEDULED')) {
+                                badgeBg = '#FFD93D';          // DRAFT — yellow
+                                badgeText = '#000000';
+                                icon = 'fa-pencil-alt';
+                              } else if (isTask) {
+                                badgeBg = '#F59E0B';          // TASK — amber
+                                badgeText = '#000000';
+                                icon = 'fa-check-square';
                               } else if (isImp) {
-                                if (effectiveStatus === 'COMPLETE') {
-                                  badgeColor = 'bg-gray-400 text-gray-100 opacity-60';
-                                  icon = 'fa-check-double';
-                                } else if (effectiveStatus === 'DUE') {
-                                  badgeColor = 'bg-red-500 text-white animate-pulse-subtle';
-                                  icon = 'fa-exclamation-triangle';
-                                } else {
-                                  badgeColor = 'bg-neo-accent text-white';
-                                  icon = 'fa-scroll';
-                                }
-                              } else {
-                                // POST type
-                                if (post.status === 'PUBLISHED') {
-                                  badgeColor = 'bg-gray-300 text-gray-500 opacity-60';
-                                  icon = 'fa-check';
-                                }
+                                badgeBg = '#F59E0B';
+                                badgeText = '#000000';
+                                icon = 'fa-scroll';
                               }
 
                               return (
                                 <div 
                                   key={post.id}
+                                  draggable={true}
+                                  onDragStart={(e) => {
+                                    e.stopPropagation();
+                                    e.dataTransfer.setData('text/plain', post.id);
+                                    e.dataTransfer.effectAllowed = 'move';
+                                  }}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setSelectedSchedulerItem(post);
                                   }}
-                                  className={`
-                                    text-[9px] leading-tight p-1.5 border border-neo-black font-black truncate relative hover:translate-y-[-1px] transition-transform duration-100
-                                    ${badgeColor}
-                                  `}
-                                  title={`${post.type || 'POST'}: ${post.text}`}
+                                  style={{
+                                    backgroundColor: badgeBg,
+                                    color: badgeText,
+                                    boxShadow: '1.5px 1.5px 0 #000',
+                                    textDecoration: strikethrough ? 'line-through' : 'none',
+                                  }}
+                                  className="text-[8px] leading-tight px-1.5 py-1 border-2 border-neo-black font-black truncate cursor-grab active:cursor-grabbing active:opacity-70 hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform duration-75"
+                                  title={`${post.type || 'POST'}: ${post.text} — Drag to reschedule`}
                                 >
-                                  <div className="flex items-center justify-between gap-1">
-                                    <div className="flex items-center gap-1 truncate">
-                                      <i className={`fas ${icon} text-[7px]`}></i>
-                                      <span className={`truncate ${isDone ? 'line-through' : ''}`}>{post.text}</span>
-                                    </div>
-                                    {post.completionPercentage !== undefined && (
-                                      <span className="text-[7px] bg-neo-black text-white px-0.5 border border-white">
-                                        {post.completionPercentage}%
-                                      </span>
-                                    )}
+                                  <div className="flex items-center gap-1 truncate">
+                                    <i className={`fas ${icon} text-[6px] shrink-0`}></i>
+                                    <span className="truncate">{post.text}</span>
                                   </div>
                                 </div>
                               );
@@ -1529,6 +1590,19 @@ const FacebookSchedulerPage: React.FC = () => {
                             <p className="mt-2 text-[10px] text-red-500 font-bold uppercase">
                               ⚠️ Facebook API is offline. Configure credentials in Settings to enable direct Meta feed posts.
                             </p>
+                          )}
+                          {isLoggedIn && selectedPage?.features && !selectedPage.features.canPublishPosts && (
+                            <div className="mt-3 p-3 bg-neo-accent/10 border-2 border-neo-accent flex items-start gap-3">
+                              <i className="fas fa-lock text-neo-accent mt-0.5" />
+                              <div>
+                                <p className="text-[10px] font-black uppercase text-neo-accent">PUBLISH_PERMISSION_MISSING</p>
+                                <p className="text-[10px] font-bold text-neo-black/70 mt-0.5">
+                                  {selectedPage.name || selectedPage.id} is missing <code>pages_manage_posts</code> or <code>pages_read_engagement</code>.
+                                  Posts will be saved locally only — live publishing to Facebook is disabled.
+                                  Go to Settings → Check Permissions.
+                                </p>
+                              </div>
+                            </div>
                           )}
                         </div>
                       )}

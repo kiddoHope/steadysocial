@@ -1240,38 +1240,38 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
   const frameCards = cards.filter(card => card.type === 'frame');
 
   const panelClass = isFocusMode
-    ? 'border-white/10 bg-slate-900/80 text-slate-50 shadow-black/30'
-    : 'border-slate-200/80 bg-white/85 text-slate-950 shadow-slate-900/10';
+    ? 'border-4 border-white bg-slate-950 text-slate-50 shadow-[4px_4px_0px_0px_white]'
+    : 'border-4 border-black bg-white text-black neo-shadow-sm';
 
   const toolButtonClass = (active = false) =>
     cn(
-      'group flex h-10 w-full items-center gap-2 rounded-2xl border px-2 text-left text-[12px] font-medium transition hover:-translate-y-0.5 active:translate-y-0',
+      'group flex h-10 w-full items-center gap-2 border-2 border-black px-2 text-left text-[12px] font-black uppercase tracking-wider transition hover:-translate-y-0.5 active:translate-y-0',
       isFocusMode
-        ? 'border-white/10 bg-slate-800/80 text-slate-200 hover:border-blue-400/50 hover:bg-slate-800'
-        : 'border-slate-200 bg-white/80 text-slate-700 hover:border-blue-300 hover:bg-blue-50',
-      active && (isFocusMode ? 'border-blue-400/70 bg-blue-500/15 text-blue-200' : 'border-blue-300 bg-blue-50 text-blue-700'),
+        ? 'border-white bg-slate-800 text-slate-200 hover:bg-slate-800'
+        : 'border-black bg-white text-black hover:bg-neo-bg',
+      active && (isFocusMode ? 'bg-white text-slate-950' : 'bg-neo-secondary text-black'),
     );
 
   const footerButtonClass = cn(
-    'inline-flex h-9 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition hover:-translate-y-0.5 active:translate-y-0',
+    'inline-flex h-9 items-center justify-center gap-2 border-2 border-black px-3 text-xs font-black uppercase transition hover:-translate-y-0.5 active:translate-y-0',
     isFocusMode
-      ? 'border-white/10 bg-slate-800/80 text-slate-100 hover:border-blue-400/50'
-      : 'border-slate-200 bg-white/85 text-slate-700 hover:border-blue-300 hover:bg-blue-50',
+      ? 'border-white bg-slate-800 text-slate-100 hover:bg-slate-700'
+      : 'border-black bg-white text-black hover:bg-neo-bg neo-btn-active',
   );
 
   const selectedCard = selectedCardId ? cards.find(card => card.id === selectedCardId) : undefined;
   const selectedConnector = selectedConnectorId ? connectors.find(connector => connector.id === selectedConnectorId) : undefined;
 
   const settingsInputClass = cn(
-    'h-9 w-full rounded-xl border px-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-400/30',
-    isFocusMode ? 'border-white/10 bg-slate-800 text-slate-100' : 'border-slate-200 bg-white/85 text-slate-700',
+    'h-9 w-full border-2 border-black px-3 text-xs font-bold uppercase tracking-wider outline-none transition focus:bg-neo-bg',
+    isFocusMode ? 'border-white bg-slate-800 text-slate-100' : 'border-black bg-white text-black',
   );
   const settingsTextareaClass = cn(
-    'min-h-[92px] w-full resize-y rounded-xl border px-3 py-2 text-sm leading-relaxed outline-none transition focus:ring-2 focus:ring-blue-400/30',
-    isFocusMode ? 'border-white/10 bg-slate-800 text-slate-100 placeholder:text-slate-500' : 'border-slate-200 bg-white/85 text-slate-700 placeholder:text-slate-400',
+    'min-h-[92px] w-full resize-y border-2 border-black px-3 py-2 text-xs font-bold uppercase tracking-wider leading-relaxed outline-none transition focus:bg-neo-bg',
+    isFocusMode ? 'border-white bg-slate-800 text-slate-100 placeholder:text-slate-500' : 'border-black bg-white text-black placeholder:text-black/45',
   );
-  const settingsLabelClass = cn('grid gap-1.5 text-xs font-semibold', isFocusMode ? 'text-slate-300' : 'text-slate-600');
-  const settingsSectionClass = cn('rounded-xl border p-3', isFocusMode ? 'border-white/10 bg-slate-900/60' : 'border-slate-200 bg-white/75');
+  const settingsLabelClass = cn('grid gap-1.5 text-[10px] font-black uppercase tracking-wider', isFocusMode ? 'text-slate-300' : 'text-black');
+  const settingsSectionClass = cn('border-2 border-black p-3', isFocusMode ? 'border-white bg-slate-900' : 'border-black bg-[#FFFDF5]');
 
   const patchSelectedCardContent = (patch: Record<string, unknown>) => {
     if (!selectedCard) return;
@@ -1297,7 +1297,7 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
         <button
           key={color}
           type="button"
-          className={cn('h-7 w-7 rounded-lg border transition hover:scale-105', selected === color ? 'border-blue-500 ring-2 ring-blue-300/50' : 'border-slate-200')}
+          className={cn('h-7 w-7 border-2 border-black transition hover:scale-105', selected === color ? 'ring-2 ring-offset-1 ring-black' : '')}
           style={{ backgroundColor: color }}
           onClick={() => onChange(color)}
           aria-label={`Set color ${color}`}
@@ -1720,7 +1720,7 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
       };
 
       return (
-        <aside className={cn('sticky top-6 max-h-[calc(100vh-3rem)] overflow-auto rounded-xl border p-4 shadow-2xl backdrop-blur-xl', panelClass)} aria-label="Bulk card settings">
+        <aside className={cn('sticky top-6 max-h-[calc(100vh-3rem)] overflow-auto border p-4', panelClass)} aria-label="Bulk card settings">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-500">Bulk settings</p>
@@ -1756,7 +1756,7 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
 
     if (!selectedCard) {
       return (
-        <aside className={cn('[&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none][&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] sticky top-6 self-start rounded-xl border p-4 shadow-2xl backdrop-blur-xl', panelClass)} aria-label="Board settings">
+        <aside className={cn('sticky top-6 self-start border p-4', panelClass)} aria-label="Board settings">
           <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-500">Settings</p>
           <div className="mt-4 space-y-3 text-sm text-slate-600">
             <div className={settingsSectionClass}>
@@ -1772,7 +1772,7 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
     }
 
     return (
-      <aside className={cn('sticky top-6 max-h-[calc(100vh-3rem)] overflow-auto rounded-xl border p-4 shadow-2xl backdrop-blur-xl', panelClass)} aria-label="Card settings">
+      <aside className={cn('sticky top-6 max-h-[calc(100vh-3rem)] overflow-auto border p-4', panelClass)} aria-label="Card settings">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-500">Settings</p>
@@ -1804,7 +1804,7 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
   }
 
   return (
-    <div className={cn('relative min-h-full font-sans overflow-hidden', isFocusMode ? 'bg-slate-950 text-slate-50' : 'bg-neo-bg text-neo-black', isFullscreen && 'fixed inset-0 z-[100] h-screen w-screen bg-slate-900')}>
+    <div className={cn('relative min-h-full font-space overflow-hidden', isFocusMode ? 'bg-slate-950 text-slate-50' : 'bg-neo-bg text-neo-black', isFullscreen && 'fixed inset-0 z-[100] h-screen w-screen bg-slate-900')}>
       <div
         aria-hidden="true"
         className={cn(
@@ -2052,15 +2052,15 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
       ) : (
         /* Regular Desktop Layout flow */
         <div className="relative z-10 mx-auto flex max-w-[1700px] flex-col gap-6 px-6 pb-8 pt-6 xl:px-0">
-          <div className={cn('rounded-xl p-2')}>
+          <div className={cn('p-2')}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between px-8">
               <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={currentBoard}
                   onChange={event => switchBoard(event.target.value)}
                   className={cn(
-                    'h-10 min-w-[170px] rounded-2xl border px-4 text-sm outline-none transition focus:ring-2 focus:ring-blue-400/40',
-                    isFocusMode ? 'border-white/10 bg-slate-800 text-slate-100' : 'border-slate-200 bg-white text-slate-700',
+                    'h-10 min-w-[170px] border-2 border-black px-4 text-xs font-black uppercase tracking-widest outline-none transition cursor-pointer',
+                    isFocusMode ? 'border-white bg-slate-800 text-slate-100' : 'border-black bg-white text-slate-700',
                   )}
                 >
                   {boardList.map(board => (
@@ -2096,16 +2096,16 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
 
           <div className={cn('grid gap-6 px-4', showToolsPanel ? 'xl:grid-cols-[240px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_320px]')}>
             {showToolsPanel && (
-            <aside className={cn('sticky top-6 self-start rounded-xl border p-4 shadow-2xl backdrop-blur-xl', panelClass)} aria-label="Board tools">
+              <aside className={cn('sticky top-6 self-start border p-4', panelClass)} aria-label="Board tools">
               <div className="space-y-4">
-                <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-500">Tools</p>
-                  <div className="mt-3 space-y-2">
+                <div className={isFocusMode ? 'border-2 border-white p-3' : 'border-2 border-black p-3 bg-neo-bg'}>
+                  <p className="text-xs font-black uppercase tracking-[0.28em] mb-3">Tools</p>
+                  <div className="mt-1 space-y-1.5">
                     {TOOLBAR_ITEMS.map(item => {
                       const Icon = item.icon;
                       return (
                         <button key={item.tool} type="button" onClick={() => setTool(item.tool)} className={toolButtonClass(tool === item.tool)} title={item.label}>
-                          <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-2xl', tool === item.tool ? 'bg-blue-600 text-white' : isFocusMode ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600')}>
+                          <span className={cn('grid h-8 w-8 shrink-0 place-items-center border-2 border-black', tool === item.tool ? 'bg-neo-accent text-black' : isFocusMode ? 'bg-white/10 text-slate-200 border-white' : 'bg-white text-slate-700')}>
                             <Icon className="h-4 w-4" />
                           </span>
                           <span className="truncate">{item.label}</span>
@@ -2115,14 +2115,14 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-500">Add cards</p>
-                  <div className="mt-3 space-y-2">
+                <div className={isFocusMode ? 'border-2 border-white p-3' : 'border-2 border-black p-3 bg-neo-bg'}>
+                  <p className="text-xs font-black uppercase tracking-[0.28em] mb-3">Add cards</p>
+                  <div className="mt-1 space-y-1.5">
                     {CARD_ITEMS.map(item => {
                       const Icon = item.icon;
                       return (
                         <button key={item.type} type="button" onClick={() => addCard(item.type)} className={toolButtonClass(false)} title={`Add ${item.label}`}>
-                          <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-2xl', isFocusMode ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600')}>
+                          <span className={cn('grid h-8 w-8 shrink-0 place-items-center border-2 border-black', isFocusMode ? 'bg-white/10 text-slate-200 border-white' : 'bg-white text-slate-700')}>
                             <Icon className="h-4 w-4" />
                           </span>
                           <span className="truncate">{item.label}</span>
@@ -2130,7 +2130,7 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
                       );
                     })}
                     <button type="button" onClick={() => addCard('sticky', 5)} className={toolButtonClass(false)} title="Add five sticky notes">
-                      <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-2xl', isFocusMode ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600')}>
+                      <span className={cn('grid h-8 w-8 shrink-0 place-items-center border-2 border-black', isFocusMode ? 'bg-white/10 text-slate-200 border-white' : 'bg-neo-secondary text-black')}>
                         <FiZap className="h-4 w-4" />
                       </span>
                       <span className="truncate">Bulk</span>
@@ -2138,16 +2138,16 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-500">Data Sources</p>
-                  <div className="mt-3 space-y-2">
+                <div className={isFocusMode ? 'border-2 border-white p-3' : 'border-2 border-black p-3 bg-neo-bg'}>
+                  <p className="text-xs font-black uppercase tracking-[0.28em] mb-3">Data Sources</p>
+                  <div className="mt-1 space-y-1.5">
                     <button
                       type="button"
                       onClick={openCrmModal}
                       className={toolButtonClass(false)}
                       title="Import CRM leads as a card"
                     >
-                      <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-2xl', isFocusMode ? 'bg-white/10 text-slate-200' : 'bg-emerald-50 text-emerald-600')}>
+                      <span className={cn('grid h-8 w-8 shrink-0 place-items-center border-2', isFocusMode ? 'bg-white/10 text-emerald-200 border-white' : 'bg-[#DCFCE7] text-emerald-700 border-black')}>
                         <FiUsers className="h-4 w-4" />
                       </span>
                       <span className="truncate">CRM Leads</span>
@@ -2158,7 +2158,7 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
                       className={toolButtonClass(false)}
                       title="Import planning file content as cards"
                     >
-                      <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-2xl', isFocusMode ? 'bg-white/10 text-slate-200' : 'bg-violet-50 text-violet-600')}>
+                      <span className={cn('grid h-8 w-8 shrink-0 place-items-center border-2', isFocusMode ? 'bg-white/10 text-violet-200 border-white' : 'bg-[#EDE9FE] text-violet-700 border-black')}>
                         <FiFileText className="h-4 w-4" />
                       </span>
                       <span className="truncate">Planning Files</span>
@@ -2169,11 +2169,11 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
             </aside>
             )}
 
-            <section className="flex min-h-[520px] flex-col overflow-hidden w-[100%] rounded-xl border border-slate-200 bg-white/90 shadow-2xl">
-              <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+            <section className="flex min-h-[520px] flex-col overflow-hidden w-[100%] border-4 border-black bg-white neo-shadow-md">
+              <div className="flex flex-col gap-3 border-b-2 border-black px-5 py-4 lg:flex-row lg:items-center lg:justify-between bg-neo-bg">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-500">Board workspace</p>
-                  <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">{currentBoard}</h2>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-black/60">Board workspace</p>
+                  <h2 className="mt-2 text-2xl font-black uppercase tracking-tight text-slate-950">{currentBoard}</h2>
                 </div>
               </div>
 
@@ -2313,18 +2313,18 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
       {/* ── CRM Leads Import Modal ──────────────────────────────────────── */}
       {dataSourceModal === 'crm' && (
         <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Import CRM leads">
-          <div className="relative flex w-full max-w-2xl flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl" style={{ maxHeight: '80vh' }}>
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div className="relative flex w-full max-w-2xl flex-col border-4 border-black bg-white neo-shadow-lg" style={{ maxHeight: '80vh' }}>
+            <div className="flex items-center justify-between border-b-2 border-black bg-neo-bg px-6 py-4">
               <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-100 text-emerald-600">
+                <span className="grid h-10 w-10 place-items-center border-2 border-black bg-neo-secondary text-black">
                   <FiUsers className="h-5 w-5" />
                 </span>
                 <div>
-                  <h2 className="text-base font-black text-slate-900">Import CRM Leads</h2>
-                  <p className="text-xs text-slate-500">Select leads to add as a table card on the board</p>
+                  <h2 className="text-base font-black text-black uppercase">Import CRM Leads</h2>
+                  <p className="text-xs font-bold text-black/60 uppercase">Select leads to add as a table card on the board</p>
                 </div>
               </div>
-              <button type="button" onClick={() => setDataSourceModal('none')} className="grid h-8 w-8 place-items-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition">
+              <button type="button" onClick={() => setDataSourceModal('none')} className="grid h-8 w-8 place-items-center border-2 border-black bg-white text-black hover:bg-neo-accent hover:text-white transition">
                 <FiX className="h-4 w-4" />
               </button>
             </div>
@@ -2353,15 +2353,15 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
                     </button>
                   </div>
                   {crmLeads.map(lead => (
-                    <label key={lead.id} className={cn('flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition hover:bg-slate-50', crmSelectedIds.has(lead.id) ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200')}>
-                      <input type="checkbox" className="mt-0.5 accent-emerald-600" checked={crmSelectedIds.has(lead.id)} onChange={() => toggleCrmLead(lead.id)} />
+                    <label key={lead.id} className={cn('flex cursor-pointer items-start gap-3 border-2 p-3 transition hover:bg-[#FFFDF5]', crmSelectedIds.has(lead.id) ? 'border-black bg-neo-secondary/30' : 'border-black/20 bg-white')}>
+                      <input type="checkbox" className="mt-0.5 accent-black" checked={crmSelectedIds.has(lead.id)} onChange={() => toggleCrmLead(lead.id)} />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-slate-900">{lead.name}</p>
-                        <div className="mt-0.5 flex flex-wrap gap-2 text-xs text-slate-500">
+                        <p className="truncate text-sm font-black text-black uppercase">{lead.name}</p>
+                        <div className="mt-0.5 flex flex-wrap gap-2 text-xs text-black/60">
                           {lead.company && <span>{lead.company}</span>}
-                          <span className={cn('rounded-full px-2 py-0.5 font-medium', lead.status === 'WON' ? 'bg-green-100 text-green-700' : lead.status === 'LOST' ? 'bg-red-100 text-red-700' : lead.status === 'QUALIFIED' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600')}>{lead.status}</span>
+                          <span className={cn('border border-black px-1.5 py-0.5 font-black text-[9px] uppercase', lead.status === 'WON' ? 'bg-[#4ADE80] text-black' : lead.status === 'LOST' ? 'bg-[#FF6B6B] text-black' : lead.status === 'QUALIFIED' ? 'bg-[#60A5FA] text-black' : 'bg-neo-secondary text-black')}>{lead.status}</span>
                           <span>{lead.source}</span>
-                          {lead.value && <span className="font-medium text-slate-700">{lead.value}</span>}
+                          {lead.value && <span className="font-black text-black">{lead.value}</span>}
                         </div>
                       </div>
                     </label>
@@ -2370,13 +2370,13 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
               )}
             </div>
 
-            <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
-              <button type="button" onClick={() => setDataSourceModal('none')} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+            <div className="flex items-center justify-between border-t-2 border-black bg-neo-bg px-6 py-4">
+              <button type="button" onClick={() => setDataSourceModal('none')} className="border-2 border-black bg-white hover:bg-[#FFFDF5] px-4 py-2 text-xs font-black uppercase text-black transition">Cancel</button>
               <button
                 type="button"
                 onClick={importCrmLeads}
                 disabled={crmSelectedIds.size === 0}
-                className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                className="flex items-center gap-2 bg-[#4ADE80] border-2 border-black hover:bg-[#3ec473] px-5 py-2 text-xs font-black uppercase text-black shadow-[4px_4px_0px_0px_black] disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
                 <FiPlus className="h-4 w-4" />
                 Add {crmSelectedIds.size > 0 ? `${crmSelectedIds.size} lead${crmSelectedIds.size > 1 ? 's' : ''}` : 'leads'} to board
@@ -2389,18 +2389,18 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
       {/* ── Planning Files Import Modal ──────────────────────────────────── */}
       {dataSourceModal === 'planning' && (
         <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Import planning files">
-          <div className="relative flex w-full max-w-2xl flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl" style={{ maxHeight: '80vh' }}>
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div className="relative flex w-full max-w-2xl flex-col border-4 border-black bg-white neo-shadow-lg" style={{ maxHeight: '80vh' }}>
+            <div className="flex items-center justify-between border-b-2 border-black bg-neo-bg px-6 py-4">
               <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-2xl bg-violet-100 text-violet-600">
+                <span className="grid h-10 w-10 place-items-center border-2 border-black bg-neo-muted text-black">
                   <FiFileText className="h-5 w-5" />
                 </span>
                 <div>
-                  <h2 className="text-base font-black text-slate-900">Import Planning Files</h2>
-                  <p className="text-xs text-slate-500">Select files to add as sticky cards on the board</p>
+                  <h2 className="text-base font-black text-black uppercase">Import Planning Files</h2>
+                  <p className="text-xs font-bold text-black/60 uppercase">Select files to add as sticky cards on the board</p>
                 </div>
               </div>
-              <button type="button" onClick={() => setDataSourceModal('none')} className="grid h-8 w-8 place-items-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition">
+              <button type="button" onClick={() => setDataSourceModal('none')} className="grid h-8 w-8 place-items-center border-2 border-black bg-white text-black hover:bg-neo-accent hover:text-white transition">
                 <FiX className="h-4 w-4" />
               </button>
             </div>
@@ -2429,15 +2429,15 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
                     </button>
                   </div>
                   {planningFiles.map(file => (
-                    <label key={file.path} className={cn('flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition hover:bg-slate-50', planningSelectedPaths.has(file.path) ? 'border-violet-300 bg-violet-50/50' : 'border-slate-200')}>
-                      <input type="checkbox" className="accent-violet-600" checked={planningSelectedPaths.has(file.path)} onChange={() => togglePlanningFile(file.path)} />
-                      <FiFileText className="h-4 w-4 shrink-0 text-violet-400" />
+                    <label key={file.path} className={cn('flex cursor-pointer items-center gap-3 border-2 p-3 transition hover:bg-[#FFFDF5]', planningSelectedPaths.has(file.path) ? 'border-black bg-neo-secondary/20' : 'border-black/20 bg-white')}>
+                      <input type="checkbox" className="accent-black" checked={planningSelectedPaths.has(file.path)} onChange={() => togglePlanningFile(file.path)} />
+                      <FiFileText className="h-4 w-4 shrink-0 text-violet-600" />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-slate-900">{file.name}</p>
-                        <p className="truncate text-xs text-slate-400">{file.path}</p>
+                        <p className="truncate text-sm font-black text-black uppercase">{file.name}</p>
+                        <p className="truncate text-xs text-black/50">{file.path}</p>
                       </div>
                       {file.fileType && (
-                        <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-500">{file.fileType}</span>
+                        <span className="border-2 border-black px-1.5 py-0.5 text-[9px] font-black uppercase text-black bg-neo-secondary">{file.fileType}</span>
                       )}
                     </label>
                   ))}
@@ -2445,16 +2445,16 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
               )}
             </div>
 
-            <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
-              <button type="button" onClick={() => setDataSourceModal('none')} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+            <div className="flex items-center justify-between border-t-2 border-black bg-neo-bg px-6 py-4">
+              <button type="button" onClick={() => setDataSourceModal('none')} className="border-2 border-black bg-white hover:bg-[#FFFDF5] px-4 py-2 text-xs font-black uppercase text-black transition">Cancel</button>
               <button
                 type="button"
                 onClick={importPlanningFiles}
                 disabled={planningSelectedPaths.size === 0 || planningImporting}
-                className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-violet-600/25 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                className="flex items-center gap-2 bg-[#C4B5FD] border-2 border-black hover:bg-[#b0a0f0] px-5 py-2 text-xs font-black uppercase text-black shadow-[4px_4px_0px_0px_black] disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
                 {planningImporting ? (
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-black" />
                 ) : (
                   <FiPlus className="h-4 w-4" />
                 )}
@@ -2467,26 +2467,26 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
       {/* ── Custom Board Create/Rename/Delete Modal ── */}
       {boardModalType !== 'none' && (
         <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Board Action Modal">
-          <div className="relative flex w-full max-w-md flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl p-6">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-              <h2 className="text-base font-black text-slate-900 capitalize">
+          <div className="relative flex w-full max-w-md flex-col border-4 border-black bg-white neo-shadow-lg p-6">
+            <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-4 bg-neo-bg -m-6 p-6">
+              <h2 className="text-base font-black text-black uppercase">
                 {boardModalType === 'create' ? 'Create New Board' : boardModalType === 'rename' ? 'Rename Board' : 'Delete Board'}
               </h2>
-              <button type="button" onClick={() => setBoardModalType('none')} className="grid h-8 w-8 place-items-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition">
+              <button type="button" onClick={() => setBoardModalType('none')} className="grid h-8 w-8 place-items-center border-2 border-black bg-white text-black hover:bg-neo-accent hover:text-white transition">
                 <FiX className="h-4 w-4" />
               </button>
             </div>
 
             {boardModalType === 'delete' ? (
-              <p className="text-sm text-slate-600 mb-6">
+              <p className="text-xs font-bold text-black uppercase my-6">
                 Are you sure you want to delete board <strong>"{currentBoard}"</strong>? This action cannot be undone.
               </p>
             ) : (
-              <div className="mb-6">
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Board Name</label>
+              <div className="my-6">
+                <label className="block text-[10px] font-black uppercase tracking-widest text-black/60 mb-2">Board Name</label>
                 <input
                   type="text"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-blue-400/30"
+                  className="w-full border-2 border-black bg-white px-3 py-2 text-xs font-bold uppercase text-black outline-none focus:bg-neo-bg"
                   value={boardModalValue}
                   onChange={e => setBoardModalValue(e.target.value)}
                   placeholder="e.g. My Strategy Board"
@@ -2499,15 +2499,15 @@ const BoardPage: React.FC<BoardPageProps> = ({ workspace }) => {
             )}
 
             <div className="flex items-center justify-end gap-2">
-              <button type="button" onClick={() => setBoardModalType('none')} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+              <button type="button" onClick={() => setBoardModalType('none')} className="border-2 border-black bg-white hover:bg-[#FFFDF5] px-4 py-2 text-xs font-black uppercase text-black transition">Cancel</button>
               <button
                 type="button"
                 onClick={submitBoardModal}
                 className={cn(
-                  "rounded-xl px-5 py-2 text-sm font-bold text-white shadow-lg transition",
+                  "border-2 border-black px-5 py-2 text-xs font-black uppercase text-black shadow-[4px_4px_0px_0px_black] transition",
                   boardModalType === 'delete'
-                    ? "bg-red-600 shadow-red-600/25 hover:bg-red-700"
-                    : "bg-blue-600 shadow-blue-600/25 hover:bg-blue-700"
+                    ? "bg-[#FF6B6B] hover:opacity-90"
+                    : "bg-[#FFD93D] hover:opacity-90"
                 )}
               >
                 {boardModalType === 'create' ? 'Create' : boardModalType === 'rename' ? 'Rename' : 'Delete'}

@@ -44,11 +44,42 @@ const MessengerBackgroundHub: React.FC = () => {
       const leads = await dbGetLeads();
       const existingLead = leads.find(l => l.messengerConversationId === conversationId);
 
+      let fbGender = '';
+      if (fbApi && fbSettings?.accessToken) {
+        try {
+          const response = await fbApi<{ participants?: { data: any[] } }>(`/${conversationId}`, 'get', {
+            fields: 'participants',
+            access_token: fbSettings.accessToken,
+          });
+          const customerId = response?.participants?.data?.find(
+            p => String(p.id) !== String(fbSettings.pageId)
+          )?.id;
+
+          if (customerId) {
+            const profile = await fbApi<{ gender?: string }>(`/${customerId}`, 'get', {
+              fields: 'gender',
+              access_token: fbSettings.accessToken,
+            });
+            if (profile?.gender) {
+              fbGender = profile.gender;
+            }
+          }
+        } catch (err) {
+          console.warn('[Hub] Failed to fetch profile from FB:', err);
+        }
+      }
+
       const leadData = {
         name: details.fullName,
         phone: details.contactNumber || undefined,
         email: details.email || undefined,
-        notes: details.address ? `Address: ${details.address}` : undefined,
+        address: details.address || undefined,
+        gender: fbGender || (details as any).gender || undefined,
+        age: (details as any).age || undefined,
+        notes: [
+          details.address ? `Address: ${details.address}` : undefined,
+          fbGender ? `Gender (Meta): ${fbGender}` : undefined,
+        ].filter(Boolean).join('\n') || undefined,
         source: 'MESSENGER' as const,
         status: (existingLead?.status || 'NEW') as any,
         messengerConversationId: conversationId,

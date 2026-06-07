@@ -1,12 +1,12 @@
-import { FacebookPage, FacebookSettings } from '../types';
+import { FacebookPage, FacebookSettings, ManagedFacebookPage, FacebookPermissionKey } from '../types';
 
-export type FacebookPageConnectionStatus = 'unknown' | 'connected' | 'not_authorized';
+export type FacebookPageConnectionStatus = 'unknown' | 'connected' | 'not_authorized' | 'error';
 
-export interface ConfiguredFacebookPage extends FacebookPage {
+export interface ConfiguredFacebookPage extends ManagedFacebookPage {
   id: string;
   name: string;
   access_token: string;
-  accessToken?: string;
+  accessToken: string;
   isDefault?: boolean;
   status?: FacebookPageConnectionStatus;
   lastTestedAt?: string;
@@ -19,12 +19,67 @@ export interface MultiPageFacebookSettings extends FacebookSettings {
     pageId?: string;
     pageName?: string;
   }>;
+  appSecret?: string;
   defaultPageId?: string;
   pageName?: string;
   pageContexts?: Record<string, string>;
   pageAiContexts?: Record<string, string>;
   aiAgentContextsByPage?: Record<string, string>;
 }
+
+const hasAll = (permissions: string[] = [], required: string[]) =>
+  required.every(permission => permissions.includes(permission));
+
+const hasAny = (permissions: string[] = [], required: string[]) =>
+  required.some(permission => permissions.includes(permission));
+
+export const buildFacebookPageFeatures = (permissions: string[] = []) => ({
+  canReadPage: hasAll(permissions, [
+    'pages_show_list',
+    'pages_read_engagement',
+  ]),
+
+  canPublishPosts: hasAll(permissions, [
+    'pages_manage_posts',
+    'pages_read_engagement',
+  ]),
+
+  canManageMessenger: hasAll(permissions, [
+    'pages_messaging',
+    'pages_manage_metadata',
+  ]),
+
+  canReadAnalytics: hasAny(permissions, [
+    'read_insights',
+    'pages_read_engagement',
+  ]),
+
+  canReadLeads: hasAll(permissions, [
+    'leads_retrieval',
+  ]),
+
+  canManageInstagram: hasAny(permissions, [
+    'instagram_basic',
+    'instagram_content_publish',
+    'instagram_manage_comments',
+    'instagram_manage_insights',
+    'instagram_manage_messages',
+  ]),
+
+  canManageCatalog: hasAny(permissions, [
+    'catalog_management',
+  ]),
+
+  canReadAds: hasAny(permissions, [
+    'ads_read',
+    'read_insights',
+  ]),
+
+  canManageAds: hasAny(permissions, [
+    'ads_management',
+    'pages_manage_ads',
+  ]),
+});
 
 const normalizeId = (value: unknown): string => String(value || '').trim();
 
@@ -60,6 +115,9 @@ export const normalizeFacebookPages = (
 
           if (!id || !accessToken) return null;
 
+          const permissions = page.permissions || [];
+          const statusVal = (page.status === 'not_authorized' ? 'error' : page.status) || 'unknown';
+
           return {
             id,
             name: String(page.name || page.pageName || `Facebook Page ${index + 1}`).trim(),
@@ -69,8 +127,13 @@ export const normalizeFacebookPages = (
               Boolean(page.isDefault) ||
               Boolean(settings.defaultPageId && id === settings.defaultPageId) ||
               (!settings.defaultPageId && index === 0),
-            status: page.status || 'unknown',
+            status: statusVal as FacebookPageConnectionStatus,
             lastTestedAt: page.lastTestedAt,
+            permissions,
+            features: page.features || buildFacebookPageFeatures(permissions),
+            productCatalogId: page.productCatalogId,
+            instagramBusinessAccountId: page.instagramBusinessAccountId,
+            adAccountId: page.adAccountId,
             aiAgentContext:
               page.aiAgentContext ||
               contextMap[id] ||
@@ -88,6 +151,17 @@ export const normalizeFacebookPages = (
 
         if (!id || !accessToken) return [];
 
+        const defaultPermissions: FacebookPermissionKey[] = [
+          'pages_show_list',
+          'pages_read_engagement',
+          'pages_manage_metadata',
+          'pages_read_user_content',
+          'pages_manage_posts',
+          'pages_messaging',
+          'read_insights',
+          'leads_retrieval'
+        ];
+
         return [
           {
             id,
@@ -95,7 +169,9 @@ export const normalizeFacebookPages = (
             access_token: accessToken,
             accessToken,
             isDefault: true,
-            status: 'unknown',
+            status: 'unknown' as FacebookPageConnectionStatus,
+            permissions: defaultPermissions,
+            features: buildFacebookPageFeatures(defaultPermissions),
             aiAgentContext: settings.aiAgentContext || contextMap[id] || '',
           } as ConfiguredFacebookPage,
         ];
@@ -112,6 +188,7 @@ export const normalizeFacebookPages = (
     isDefault: hasDefault ? Boolean(page.isDefault) : index === 0,
   }));
 };
+
 
 export const sanitizeFacebookPages = (
   pages: ConfiguredFacebookPage[]

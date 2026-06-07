@@ -523,6 +523,96 @@ app.put('/settings/ai', async (req, res) => {
     }
 });
 
+// --- Facebook Token Debug Endpoint ---
+
+/**
+ * POST /facebook/debug-token
+ * Inspects a Page Access Token using the Facebook Graph API debug_token endpoint.
+ * App ID and App Secret can come from the saved Settings page, request body,
+ * process.env, or .env fallback.
+ *
+ * Body: { inputToken: string, appId?: string, appSecret?: string }
+ */
+app.post('/facebook/debug-token', async (req, res) => {
+    try {
+        const { inputToken } = req.body || {};
+
+        if (!inputToken) {
+            return res.status(400).json({ success: false, message: 'inputToken is required.' });
+        }
+
+        const settings = await getStoredFacebookSettings();
+
+        const appId = String(
+            req.body?.appId ||
+            settings.appId ||
+            process.env.FB_APP_ID ||
+            await readEnvValue('FB_APP_ID') ||
+            ''
+        ).trim();
+
+        const appSecret = String(
+            req.body?.appSecret ||
+            settings.appSecret ||
+            process.env.FB_APP_SECRET ||
+            await readEnvValue('FB_APP_SECRET') ||
+            ''
+        ).trim();
+
+        if (!appId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Facebook App ID is not configured in Settings.',
+            });
+        }
+
+        if (!appSecret) {
+            return res.status(400).json({
+                success: false,
+                message: 'Facebook App Secret is not configured in Settings.',
+            });
+        }
+
+        const appAccessToken = `${appId}|${appSecret}`;
+        const debugUrl = `https://graph.facebook.com/${FACEBOOK_GRAPH_VERSION}/debug_token?input_token=${encodeURIComponent(inputToken)}&access_token=${encodeURIComponent(appAccessToken)}`;
+
+        const debugResponse = await fetch(debugUrl);
+        const debugData = await debugResponse.json().catch(() => ({}));
+
+        if (!debugResponse.ok || debugData.error) {
+            const errMsg = debugData?.error?.message || `Facebook debug_token returned HTTP ${debugResponse.status}`;
+            console.error('[debug-token] Error from Facebook:', errMsg);
+            return res.status(debugResponse.status || 400).json({
+                success: false,
+                message: errMsg,
+                error: debugData?.error || debugData,
+            });
+        }
+
+        const tokenData = debugData?.data || {};
+
+        return res.json({
+            success: true,
+            data: {
+                is_valid: tokenData.is_valid ?? false,
+                app_id: tokenData.app_id,
+                user_id: tokenData.user_id,
+                type: tokenData.type,
+                expires_at: tokenData.expires_at,
+                scopes: tokenData.scopes || [],
+                granular_scopes: tokenData.granular_scopes || [],
+                error: tokenData.error,
+            },
+        });
+    } catch (error) {
+        console.error('[debug-token] Unexpected error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to inspect token.',
+        });
+    }
+});
+
 // --- Lead Core (CRM) Endpoints ---
 
 app.get('/leads', async (req, res) => {
@@ -961,6 +1051,7 @@ app.get('/facebook/test', (req, res) => {
             'POST /facebook/feed',
             'POST /facebook/photo',
             'POST /facebook/uploads',
+            'POST /facebook/debug-token',
         ],
     });
 });

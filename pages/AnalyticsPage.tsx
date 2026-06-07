@@ -193,8 +193,8 @@ const AnalyticsPage: React.FC = () => {
         // Canvases
         const canvases = await (dbFetchCanvases as any)(selectedPage?.id);
         setCanvasesTotal(canvases.length);
-        setCanvasesDraft(canvases.filter(c => c.status === CanvasStatus.DRAFT).length);
-        setCanvasesReady(canvases.filter(c => c.status === CanvasStatus.APPROVED || c.status === CanvasStatus.PENDING_REVIEW).length);
+        setCanvasesDraft(canvases.filter((c: any )=> c.status === CanvasStatus.DRAFT).length);
+        setCanvasesReady(canvases.filter((c: any ) => c.status === CanvasStatus.APPROVED || c.status === CanvasStatus.PENDING_REVIEW).length);
 
         // Planning
         const planningRes = await getPlanningFiles();
