@@ -13,7 +13,6 @@ dist-ssr
 *.local
 
 dist_electron
-electron
 steadysocial-mcp-server
 public/skills
 scripts
