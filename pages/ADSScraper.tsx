@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMarketResearch } from '../contexts/MarketResearchContext';
 
 type DataSource = 'meta' | 'google_trends' | 'tiktok_ads' | 'reddit';
 type BrowserState = 'idle' | 'launching' | 'navigating' | 'extracting' | 'analyzing' | 'complete' | 'error';
@@ -138,6 +139,7 @@ interface MarketKpis {
 
 interface MarketAnalysis {
   detectedNiche?: string;
+  overallSummary?: string;
   marketSummary?: string;
   winningAds?: string[];
   winningContent?: string[];
@@ -163,6 +165,7 @@ interface ResearchResponse {
   kpis?: MarketKpis;
   marketAnalysis?: MarketAnalysis;
   analysisText?: string;
+  reportMarkdown?: string;
   warnings?: string[];
   query?: Record<string, unknown>;
 }
@@ -573,7 +576,25 @@ const InsightsPanel: React.FC<{
   response: ResearchResponse | null;
   analysis: MarketAnalysis | null;
   analysisText: string;
-}> = ({ response, analysis, analysisText }) => {
+  planningDirectories: string[];
+  saveDirectory: string;
+  onSaveDirectoryChange: (directory: string) => void;
+  onSaveReport: () => void;
+  isSavingReport: boolean;
+  savedReportPath: string;
+  saveReportError: string | null;
+}> = ({
+  response,
+  analysis,
+  analysisText,
+  planningDirectories,
+  saveDirectory,
+  onSaveDirectoryChange,
+  onSaveReport,
+  isSavingReport,
+  savedReportPath,
+  saveReportError,
+}) => {
   if (!response) return null;
 
   const kpis = response.kpis || analysis?.kpis || {};
@@ -592,14 +613,47 @@ const InsightsPanel: React.FC<{
         <div className="xl:col-span-1 bg-neo-black p-6 text-white neo-border-sm">
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-neo-secondary">Market Summary</p>
           <p className="mt-5 whitespace-pre-line text-sm font-bold leading-relaxed text-zinc-200">
-            {analysis?.marketSummary || analysisText || 'No AI summary returned. Local KPIs are still available.'}
+            {analysis?.overallSummary || analysis?.marketSummary || analysisText || 'No AI summary returned. Only scraped records and numeric KPIs are available.'}
           </p>
           {analysis?.aiProvider && (
             <p className="mt-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">AI Provider: {analysis.aiProvider}</p>
           )}
           {analysis?.aiError && (
-            <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-rose-300">AI fallback used: {analysis.aiError}</p>
+            <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-rose-300">AI note: {analysis.aiError}</p>
           )}
+
+          <div className="mt-6 space-y-3 border-t-2 border-white/20 pt-5">
+            <label className="block text-[10px] font-black uppercase tracking-[0.25em] text-neo-secondary">Save to Planner Directory</label>
+            <select
+              value={saveDirectory}
+              onChange={event => onSaveDirectoryChange(event.target.value)}
+              className="w-full bg-white px-3 py-3 text-xs font-black uppercase text-neo-black outline-none neo-border-sm"
+            >
+              <option value="">ROOT_PLANS</option>
+              {planningDirectories.filter(Boolean).map(directory => (
+                <option key={directory} value={directory}>{directory}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={onSaveReport}
+              disabled={isSavingReport}
+              className="w-full bg-neo-secondary px-4 py-3 text-[10px] font-black uppercase tracking-[0.25em] text-neo-black neo-border-sm transition-transform active:translate-y-1 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSavingReport ? 'Saving MD...' : 'Save MD to Planner'}
+            </button>
+            {savedReportPath && (
+              <a
+                href={`/planning?file=${encodeURIComponent(savedReportPath)}`}
+                className="block bg-white px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.25em] text-neo-black neo-border-sm"
+              >
+                View Saved Report in Planner
+              </a>
+            )}
+            {saveReportError && (
+              <p className="text-[10px] font-black uppercase tracking-widest text-rose-300">{saveReportError}</p>
+            )}
+          </div>
         </div>
 
         <div className="xl:col-span-2 grid gap-5 md:grid-cols-2">
@@ -865,36 +919,40 @@ const RedditCard: React.FC<{ post: RedditPostData }> = ({ post }) => {
 };
 
 const ADSScraperPage: React.FC = () => {
-  const [filters, setFilters] = useState<SearchFilters>({
-    niche: 'Fitness Supplements',
-    pageUrl: '',
-    platform: Platform.ALL,
-    status: AdStatus.ACTIVE,
-    country: 'US',
-    resultCount: 50,
-    timeframe: '30d',
-    impressionDate: '',
-    sources: {
-      meta: true,
-      google_trends: true,
-      tiktok_ads: true,
-      reddit: true,
-    },
-    useAI: true,
-    headless: true,
-  });
+  const {
+    filters,
+    setFilters,
+    apiEndpoint,
+    setApiEndpoint,
+    response,
+    setResponse,
+    metaAds,
+    setMetaAds,
+    tiktokAds,
+    setTiktokAds,
+    redditPosts,
+    setRedditPosts,
+    googleTrends,
+    setGoogleTrends,
+    logs,
+    setLogs,
+    browserState,
+    setBrowserState,
+    progress,
+    setProgress,
+    saveDirectory,
+    setSaveDirectory,
+    planningDirectories,
+    setPlanningDirectories,
+    savedReportPath,
+    setSavedReportPath,
+    clearResearchState,
+  } = useMarketResearch();
 
-  const [apiEndpoint, setApiEndpoint] = useState(API_ENDPOINT);
-  const [response, setResponse] = useState<ResearchResponse | null>(null);
-  const [metaAds, setMetaAds] = useState<AdData[]>([]);
-  const [tiktokAds, setTiktokAds] = useState<TikTokContentData[]>([]);
-  const [redditPosts, setRedditPosts] = useState<RedditPostData[]>([]);
-  const [googleTrends, setGoogleTrends] = useState<GoogleTrendData | null>(null);
-  const [logs, setLogs] = useState<ScraperLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [browserState, setBrowserState] = useState<BrowserState>('idle');
-  const [progress, setProgress] = useState(0);
+  const [isSavingReport, setIsSavingReport] = useState(false);
+  const [saveReportError, setSaveReportError] = useState<string | null>(null);
 
   const addLog = useCallback((message: string, type: LogType = 'info') => {
     setLogs(previousLogs => [
@@ -908,7 +966,7 @@ const ADSScraperPage: React.FC = () => {
   }, []);
 
   const updateFilter = <Key extends keyof SearchFilters>(key: Key, value: SearchFilters[Key]) => {
-    setFilters(previousFilters => ({ ...previousFilters, [key]: value }));
+    setFilters(previousFilters => ({ ...previousFilters, [key]: value } as any));
   };
 
   const toggleSource = (source: DataSource) => {
@@ -918,13 +976,121 @@ const ADSScraperPage: React.FC = () => {
         ...previousFilters.sources,
         [source]: !previousFilters.sources[source],
       },
-    }));
+    } as any));
   };
 
   const selectedSources = useMemo(
     () => (Object.entries(filters.sources) as [DataSource, boolean][]).filter(([, enabled]) => enabled).map(([source]) => source),
     [filters.sources]
   );
+
+  const backendBaseUrl = useMemo(() => {
+    try {
+      return new URL(apiEndpoint).origin;
+    } catch {
+      return 'http://localhost:3001';
+    }
+  }, [apiEndpoint]);
+
+  const loadPlanningDirectories = useCallback(async () => {
+    try {
+      const directoryResponse = await fetch(`${backendBaseUrl}/planning/directories`);
+      const payload = await directoryResponse.json().catch(() => null) as { directories?: string[] } | null;
+      const directories = Array.isArray(payload?.directories) ? payload.directories : [''];
+      setPlanningDirectories(['', ...directories.filter(Boolean)].filter((item, index, list) => list.indexOf(item) === index));
+    } catch (caughtError) {
+      console.warn('Could not load planner directories:', caughtError);
+      setPlanningDirectories(previous => previous.length ? previous : ['']);
+    }
+  }, [backendBaseUrl, setPlanningDirectories]);
+
+  useEffect(() => {
+    loadPlanningDirectories();
+  }, [loadPlanningDirectories]);
+
+  const buildReportFilename = useCallback(() => {
+    const sourceName = response?.detectedNiche || response?.marketAnalysis?.detectedNiche || filters.niche || filters.pageUrl || 'market-research';
+    const slug = String(sourceName)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'market-research';
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+    return `${slug}-${stamp}.md`;
+  }, [filters.niche, filters.pageUrl, response]);
+
+  const buildClientReportMarkdown = useCallback(() => {
+    const currentAnalysis = response?.marketAnalysis || null;
+    const lines: string[] = [];
+    const title = response?.detectedNiche || currentAnalysis?.detectedNiche || filters.niche || filters.pageUrl || 'Market Research';
+
+    lines.push(`# ${title} Research Summary`);
+
+    const summary = currentAnalysis?.overallSummary || currentAnalysis?.marketSummary || response?.analysisText;
+    if (summary) lines.push('', summary);
+
+    const sections: [string, string[] | undefined][] = [
+      ['Winning Ads', currentAnalysis?.winningAds],
+      ['Winning Content', currentAnalysis?.winningContent],
+      ['Content Types', currentAnalysis?.contentTypes],
+      ['Structural Posting', currentAnalysis?.structuralPosting],
+      ['Demographics', currentAnalysis?.demographics],
+      ['Time Analysis', currentAnalysis?.timeAnalysis],
+      ['Recommended Moves', currentAnalysis?.recommendations],
+    ];
+
+    sections.forEach(([title, items]) => {
+      if (Array.isArray(items) && items.length) {
+        lines.push('', `## ${title}`);
+        items.forEach(item => lines.push(`- ${item}`));
+      }
+    });
+
+    lines.push('', '## Scraped Data Counts');
+    lines.push(`- Meta ads: ${metaAds.length}`);
+    lines.push(`- TikTok items: ${tiktokAds.length}`);
+    lines.push(`- Reddit posts: ${redditPosts.length}`);
+    lines.push(`- Google Trends: ${googleTrends ? 'available' : 'not available'}`);
+
+    return lines.join('\n');
+  }, [filters.niche, filters.pageUrl, googleTrends, metaAds.length, redditPosts.length, response, tiktokAds.length]);
+
+  const handleSaveReportToPlanner = useCallback(async () => {
+    if (!response) return;
+
+    setIsSavingReport(true);
+    setSaveReportError(null);
+    setSavedReportPath('');
+
+    try {
+      const markdown = response.reportMarkdown || response.analysisText || buildClientReportMarkdown();
+      const saveResponse = await fetch(`${backendBaseUrl}/api/market-research/save-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          directory: saveDirectory || '',
+          filename: buildReportFilename(),
+          markdown,
+        }),
+      });
+
+      const payload = await saveResponse.json().catch(() => null) as { success?: boolean; path?: string; error?: string; message?: string } | null;
+
+      if (!saveResponse.ok || payload?.success === false) {
+        throw new Error(payload?.error || payload?.message || `Planner save failed with HTTP ${saveResponse.status}.`);
+      }
+
+      setSavedReportPath(payload?.path || '');
+      addLog(`Planner markdown saved: ${payload?.path || 'saved report'}`, 'success');
+      await loadPlanningDirectories();
+    } catch (caughtError) {
+      const message = getErrorMessage(caughtError);
+      setSaveReportError(message);
+      addLog(`Planner save failed: ${message}`, 'error');
+    } finally {
+      setIsSavingReport(false);
+    }
+  }, [addLog, backendBaseUrl, buildClientReportMarkdown, buildReportFilename, loadPlanningDirectories, response, saveDirectory, setSavedReportPath]);
 
   const handleStartResearch = useCallback(async () => {
     if (loading) return;
@@ -944,6 +1110,8 @@ const ADSScraperPage: React.FC = () => {
 
     setLoading(true);
     setError(null);
+    setSaveReportError(null);
+    setSavedReportPath('');
     setResponse(null);
     setMetaAds([]);
     setTiktokAds([]);
@@ -1034,18 +1202,12 @@ const ADSScraperPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [addLog, apiEndpoint, filters, loading, selectedSources]);
+  }, [addLog, apiEndpoint, filters, loading, selectedSources, setSavedReportPath]);
 
   const clearResults = () => {
-    setResponse(null);
-    setMetaAds([]);
-    setTiktokAds([]);
-    setRedditPosts([]);
-    setGoogleTrends(null);
-    setLogs([]);
+    clearResearchState();
     setError(null);
-    setBrowserState('idle');
-    setProgress(0);
+    setSaveReportError(null);
   };
 
   const totalImpressions = useMemo(() => metaAds.reduce((sum, ad) => sum + ad.impressionCount, 0), [metaAds]);
@@ -1241,7 +1403,7 @@ const ADSScraperPage: React.FC = () => {
             <ProgressMonitor
               state={browserState}
               progress={progress}
-              filters={filters}
+              filters={filters as any}
               metaCount={metaAds.length}
               tiktokCount={tiktokAds.length}
               redditCount={redditPosts.length}
@@ -1253,7 +1415,18 @@ const ADSScraperPage: React.FC = () => {
 
         {hasAnyResults && (
           <>
-            <InsightsPanel response={response} analysis={analysis} analysisText={response?.analysisText || ''} />
+            <InsightsPanel
+              response={response}
+              analysis={analysis}
+              analysisText={response?.analysisText || ''}
+              planningDirectories={planningDirectories}
+              saveDirectory={saveDirectory}
+              onSaveDirectoryChange={setSaveDirectory}
+              onSaveReport={handleSaveReportToPlanner}
+              isSavingReport={isSavingReport}
+              savedReportPath={savedReportPath}
+              saveReportError={saveReportError}
+            />
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
               <MetricCard label="Meta Ads" value={String(metaAds.length)} />

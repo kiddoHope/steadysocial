@@ -2758,6 +2758,89 @@ const getPlanningDir = () => {
     return path.join(DATA_DIR, 'planning');
 };
 
+
+function isPathInside(baseDir, targetPath) {
+    const relativePath = path.relative(baseDir, targetPath);
+    return relativePath === '' || (!!relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+function normalizePlanningSubPath(rawPath = '') {
+    return String(rawPath || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .split('/')
+        .map(part => part.trim())
+        .filter(part => part && part !== '.' && part !== '..')
+        .join('/');
+}
+
+function sanitizeMarkdownFilename(rawName = '') {
+    const cleanBase = String(rawName || '')
+        .replace(/\\/g, '/')
+        .split('/')
+        .pop()
+        .replace(/\.md$/i, '')
+        .replace(/[^a-z0-9-_ ]/gi, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .toLowerCase();
+
+    const filename = cleanBase || `market-research-${Date.now()}`;
+    return `${filename}.md`;
+}
+
+function resolvePlanningPath(subPath = '') {
+    const planningDir = path.resolve(getPlanningDir());
+    const normalizedSubPath = normalizePlanningSubPath(subPath);
+    const targetPath = path.resolve(planningDir, normalizedSubPath);
+
+    if (!isPathInside(planningDir, targetPath)) {
+        const error = new Error('Access denied: Directory traversal detected.');
+        error.status = 403;
+        throw error;
+    }
+
+    return {
+        planningDir,
+        normalizedSubPath,
+        targetPath,
+    };
+}
+
+app.get('/planning/directories', async (req, res) => {
+    try {
+        const planningDir = path.resolve(getPlanningDir());
+        await fs.mkdir(planningDir, { recursive: true });
+
+        const directories = [''];
+
+        async function walk(relativeDir = '') {
+            const currentDir = path.resolve(planningDir, relativeDir);
+            if (!isPathInside(planningDir, currentDir)) return;
+
+            const entries = await fs.readdir(currentDir, { withFileTypes: true }).catch(() => []);
+
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                const childRelative = path.join(relativeDir, entry.name).replace(/\\/g, '/');
+                directories.push(childRelative);
+                await walk(childRelative);
+            }
+        }
+
+        await walk('');
+
+        res.json({
+            success: true,
+            directories: [...new Set(directories)].sort((a, b) => a.localeCompare(b)),
+        });
+    } catch (error) {
+        console.error('Failed to read planning directories:', error);
+        res.status(error.status || 500).json({ error: error.message });
+    }
+});
+
 // 1. List files and folders
 app.get('/planning/files', async (req, res) => {
     try {
@@ -4629,79 +4712,24 @@ function inferNicheLocally({ niche, pageUrl, metaAds, tiktokAds, googleTrends, r
 }
 
 function classifyContentTypes(metaAds = [], tiktokAds = [], redditPosts = []) {
-    const text = [...metaAds, ...tiktokAds, ...redditPosts]
-        .map(item => `${item.adCopy || ''} ${item.caption || ''} ${item.title || ''} ${item.selfText || ''}`.toLowerCase())
-        .join(' ');
-
-    const checks = [
-        ['Discount or promo offer', /discount|sale|off|promo|voucher|limited|deal|free shipping|bundle/],
-        ['Problem-solution hook', /problem|struggle|tired|avoid|stop|fix|solution|easy way/],
-        ['Educational content', /how to|guide|tips|learn|why|mistake|facts|science|formula/],
-        ['Social proof or testimonial', /review|trusted|customers|results|before|after|testimonial|rated/],
-        ['Urgency and scarcity', /today|now|limited time|last chance|while supplies|slots/],
-        ['Product demonstration', /demo|watch|see how|step|works|unbox|try/],
-        ['Aspirational lifestyle', /transform|confidence|glow|premium|luxury|dream|better/],
-    ];
-
-    const hits = checks.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
-    return hits.length ? hits : ['Direct product or service presentation'];
+    // Content type wording is intentionally left for the AI analysis.
+    // This helper only exists for backward compatibility with older callers.
+    return [];
 }
 
 function analyzePostingStructure(metaAds = [], tiktokAds = [], redditPosts = []) {
-    const allItems = [...metaAds, ...tiktokAds, ...redditPosts];
-    const copyLengths = allItems.map(item => normalizeResearchText(item.adCopy || item.caption || item.title || item.selfText).length).filter(Boolean);
-    const avgCopyLength = copyLengths.length ? Math.round(copyLengths.reduce((sum, value) => sum + value, 0) / copyLengths.length) : 0;
-
-    const structures = [];
-    structures.push(avgCopyLength > 160 ? 'Long-form ad copy is common. Competitors are explaining benefits before the CTA.' : 'Short-form hooks dominate. Competitors are relying on fast claims and direct CTAs.');
-
-    const hasCta = allItems.some(item => /shop|buy|learn|sign up|get|book|message|order|download/i.test(`${item.adCopy || ''} ${item.cta || ''}`));
-    structures.push(hasCta ? 'Most winning creatives include a clear action step.' : 'CTA usage is weak. Clearer action prompts may become an advantage.');
-
-    const videoCount = metaAds.filter(ad => ad.media?.type === 'video').length + tiktokAds.filter(item => item.videoUrl).length;
-    if (videoCount > 0) structures.push(`${videoCount} video-led signal(s) detected, suggesting motion creative should be tested.`);
-
-    if (redditPosts.length) {
-        const avgComments = Math.round(redditPosts.reduce((sum, post) => sum + Number(post.numComments || 0), 0) / redditPosts.length);
-        structures.push(`Reddit discussion depth averages about ${avgComments} comment(s) per collected post, useful for pain-point mining and objection discovery.`);
-    }
-
-    return structures;
+    // Structural posting should be produced by the AI from scraped records, not by canned copy rules.
+    return [];
 }
 
 function analyzeDemographics({ niche, country, metaAds = [], tiktokAds = [], redditPosts = [] }) {
-    const combinedText = [niche, ...metaAds.map(ad => ad.adCopy || ad.caption || ''), ...tiktokAds.map(item => item.adCopy || ''), ...redditPosts.map(post => `${post.title || ''} ${post.selfText || ''} ${post.subreddit || ''}`)].join(' ').toLowerCase();
-    const demographics = [];
-
-    if (/mom|parent|baby|family|kids|children/.test(combinedText)) demographics.push('Likely household and family decision-makers.');
-    if (/student|school|college|review|exam|learn/.test(combinedText)) demographics.push('Likely students or skill-building audiences.');
-    if (/skin|beauty|glow|makeup|hair|perfume|fragrance/.test(combinedText)) demographics.push('Likely beauty and personal care buyers, skewing toward appearance-led purchase triggers.');
-    if (/fitness|gym|protein|weight|health|supplement/.test(combinedText)) demographics.push('Likely health, fitness, and performance-focused buyers.');
-    if (/business|saas|crm|agency|marketing|sales|lead/.test(combinedText)) demographics.push('Likely business owners, marketers, sales teams, and operators.');
-
-    demographics.push(`Geo filter is ${country}, so validate language, currency, shipping claims, and local proof for this market.`);
-    return demographics;
+    // Audience and demographic language should be produced by the AI only when the dataset supports it.
+    return [];
 }
 
 function analyzeTimeSignals(metaAds = [], googleTrends = null, timeframe = '30d') {
-    const signals = [];
-    const startDates = metaAds.map(ad => normalizeResearchText(ad.startDate)).filter(Boolean);
-
-    if (startDates.length) {
-        const recentLabel = startDates.slice(0, 5).join(', ');
-        signals.push(`Meta launch dates detected across ${startDates.length} ads. Recent visible dates include: ${recentLabel}.`);
-    } else {
-        signals.push('Meta launch timing is limited or hidden. Use active duration once available from the source.');
-    }
-
-    if (googleTrends?.timeline?.length) {
-        const latest = Number(googleTrends.latestInterest || 0);
-        const average = Number(googleTrends.averageInterest || 0);
-        const direction = latest >= average ? 'above' : 'below';
-        signals.push(`Google Trends latest interest is ${latest}, which is ${direction} the ${timeframe} average of ${average}.`);
-    }
-
-    return signals;
+    // Time analysis should be produced by the AI from visible dates and trend points.
+    return [];
 }
 
 function computeResearchKpis({ metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [] }) {
@@ -4709,7 +4737,17 @@ function computeResearchKpis({ metaAds = [], tiktokAds = [], googleTrends = null
     const totalImpressions = impressions.reduce((sum, value) => sum + value, 0);
     const averageImpressions = impressions.length ? Math.round(totalImpressions / impressions.length) : 0;
     const topImpressionCount = impressions.length ? Math.max(...impressions) : 0;
-    const contentTypes = classifyContentTypes(metaAds, tiktokAds, redditPosts);
+    const contentSignalKinds = new Set();
+    if (metaAds.length) contentSignalKinds.add('meta_ads');
+    if (tiktokAds.length) contentSignalKinds.add('tiktok_ads');
+    if (redditPosts.length) contentSignalKinds.add('reddit_posts');
+    if (googleTrends) contentSignalKinds.add('google_trends');
+    if (metaAds.some(ad => ad.media?.type === 'video')) contentSignalKinds.add('meta_video');
+    if (metaAds.some(ad => ad.imageUrl || ad.brandLogo || ad.media?.poster)) contentSignalKinds.add('meta_image');
+    if (tiktokAds.some(item => item.videoUrl)) contentSignalKinds.add('tiktok_video');
+    if (tiktokAds.some(item => item.imageUrl)) contentSignalKinds.add('tiktok_image');
+    if (redditPosts.some(post => post.imageUrl || post.thumbnail)) contentSignalKinds.add('reddit_image');
+
     const estimatedEngagementSignals = tiktokAds.reduce((sum, item) => {
         const metrics = item.metrics || {};
         return sum + ['Likes', 'Shares', 'Comments', 'Clicks', 'Impressions'].reduce((innerSum, key) => {
@@ -4722,7 +4760,7 @@ function computeResearchKpis({ metaAds = [], tiktokAds = [], googleTrends = null
     const trendAverageInterest = Number(googleTrends?.averageInterest || 0);
     const trendLatestInterest = Number(googleTrends?.latestInterest || 0);
     const trendMomentum = trendLatestInterest - trendAverageInterest;
-    const contentDiversityScore = Math.min(100, Math.round((contentTypes.length / 7) * 100));
+    const contentDiversityScore = Math.min(100, Math.round((contentSignalKinds.size / 9) * 100));
     const opportunityScore = Math.max(0, Math.min(100, Math.round(
         (trendLatestInterest * 0.35) +
         (contentDiversityScore * 0.25) +
@@ -4749,7 +4787,36 @@ function computeResearchKpis({ metaAds = [], tiktokAds = [], googleTrends = null
     };
 }
 
-function buildFallbackMarketAnalysis({ query, metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [], aiError = '' }) {
+function normalizeAnalysisString(value, fallback = '') {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    return fallback;
+}
+
+function normalizeAnalysisList(value, limit = 12) {
+    if (!Array.isArray(value)) return [];
+
+    return value
+        .map(item => normalizeAnalysisString(item))
+        .filter(Boolean)
+        .filter((item, index, self) => self.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index)
+        .slice(0, limit);
+}
+
+function normalizeAnalysisKpis(parsedKpis = {}, fallbackKpis = {}) {
+    const normalized = { ...fallbackKpis };
+
+    Object.entries(parsedKpis || {}).forEach(([key, value]) => {
+        const numericValue = Number(value);
+        if (Number.isFinite(numericValue)) {
+            normalized[key] = numericValue;
+        }
+    });
+
+    return normalized;
+}
+
+function buildDataOnlyMarketAnalysis({ query, metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [], aiProvider = 'data-only', aiError = '' }) {
     const detectedNiche = inferNicheLocally({
         niche: query.niche,
         pageUrl: query.pageUrl,
@@ -4760,62 +4827,69 @@ function buildFallbackMarketAnalysis({ query, metaAds = [], tiktokAds = [], goog
     });
 
     const kpis = computeResearchKpis({ metaAds, tiktokAds, googleTrends, redditPosts });
-    const winningMeta = [...metaAds]
-        .sort((a, b) => Number(b.impressionCount || b.impressionValue || 0) - Number(a.impressionCount || a.impressionValue || 0))
-        .slice(0, 5)
-        .map(ad => `${ad.brandName || 'Unknown'}: ${ad.impressionCountText || ad.impressionText || ad.impressionCount || 'undisclosed'} impressions. ${normalizeResearchText(ad.adCopy || ad.caption).slice(0, 140)}`);
-
-    const winningTikTok = [...tiktokAds]
-        .slice(0, 5)
-        .map(item => `${item.brandName || 'TikTok Advertiser'}: ${normalizeResearchText(item.adCopy).slice(0, 160)}`);
-
-    const winningReddit = [...redditPosts]
-        .sort((a, b) => (Number(b.score || 0) + Number(b.numComments || 0)) - (Number(a.score || 0) + Number(a.numComments || 0)))
-        .slice(0, 5)
-        .map(post => `${post.subreddit || 'Reddit'}: ${post.title || 'Untitled'} (${post.score || 0} score, ${post.numComments || 0} comments)`);
-
-    const contentTypes = classifyContentTypes(metaAds, tiktokAds, redditPosts);
-    const structuralPosting = analyzePostingStructure(metaAds, tiktokAds, redditPosts);
-    const demographics = analyzeDemographics({ niche: detectedNiche, country: query.country, metaAds, tiktokAds, redditPosts });
-    const timeAnalysis = analyzeTimeSignals(metaAds, googleTrends, query.timeframe);
-
-    const recommendations = [
-        'Use the highest-impression Meta ad as the first benchmark for offer framing and opening hook.',
-        'Create at least three creative tests: one direct offer, one educational angle, and one proof-led or testimonial angle.',
-        'Match the country filter with localized language, currency, delivery promise, and social proof.',
-        'Review rising Google queries and convert them into short content topics or ad hooks.',
-        'Use high-comment Reddit threads to identify pain points, objections, competitor complaints, and phrasing customers already use.',
-    ];
 
     return {
         detectedNiche,
-        marketSummary: `${detectedNiche} shows ${kpis.datasetCount} collected signal group(s). The current opportunity score is ${kpis.opportunityScore}/100, based on ad volume, TikTok signals, Reddit discussion signals, Google Trends interest, and content diversity.`,
-        winningAds: winningMeta,
-        winningContent: [...winningTikTok, ...winningReddit],
-        contentTypes,
-        structuralPosting,
-        demographics,
-        timeAnalysis,
-        recommendations,
+        overallSummary: '',
+        marketSummary: '',
+        winningAds: [],
+        winningContent: [],
+        contentTypes: [],
+        structuralPosting: [],
+        demographics: [],
+        timeAnalysis: [],
+        recommendations: [],
         kpis,
-        aiProvider: 'local-fallback',
+        aiProvider,
         aiError,
     };
 }
 
-function buildAnalysisPrompt({ query, metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [], fallbackAnalysis }) {
-    const compactMeta = metaAds.slice(0, 20).map(ad => ({
+function normalizeMarketAnalysisFromAI(parsed = {}, baseline = {}, provider = '') {
+    const overallSummary =
+        normalizeAnalysisString(parsed.overallSummary) ||
+        normalizeAnalysisString(parsed.overall_summary) ||
+        normalizeAnalysisString(parsed.summary);
+
+    const marketSummary =
+        normalizeAnalysisString(parsed.marketSummary) ||
+        normalizeAnalysisString(parsed.market_summary);
+
+    return {
+        detectedNiche:
+            normalizeAnalysisString(parsed.detectedNiche) ||
+            normalizeAnalysisString(parsed.detected_niche) ||
+            baseline.detectedNiche,
+        overallSummary,
+        marketSummary,
+        winningAds: normalizeAnalysisList(parsed.winningAds || parsed.winning_ads || parsed.topAds || parsed.top_ads),
+        winningContent: normalizeAnalysisList(parsed.winningContent || parsed.winning_content || parsed.winningAdsOrContent || parsed.winning_ads_or_content),
+        contentTypes: normalizeAnalysisList(parsed.contentTypes || parsed.content_types),
+        structuralPosting: normalizeAnalysisList(parsed.structuralPosting || parsed.structural_posting || parsed.postingStructure || parsed.posting_structure),
+        demographics: normalizeAnalysisList(parsed.demographics || parsed.audience || parsed.audienceSignals || parsed.audience_signals),
+        timeAnalysis: normalizeAnalysisList(parsed.timeAnalysis || parsed.time_analysis || parsed.timingSignals || parsed.timing_signals),
+        recommendations: normalizeAnalysisList(parsed.recommendations || parsed.recommendedMoves || parsed.recommended_moves),
+        kpis: normalizeAnalysisKpis(parsed.kpis, baseline.kpis),
+        aiProvider: provider,
+        aiError: '',
+    };
+}
+
+function buildAnalysisPrompt({ query, metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [], kpis }) {
+    const compactMeta = metaAds.slice(0, 30).map(ad => ({
         brandName: ad.brandName,
         status: ad.status,
         startDate: ad.startDate,
+        activeTime: ad.activeTime,
         impressions: ad.impressionCount || ad.impressionValue || ad.impressionText,
         platforms: ad.platforms,
-        copy: normalizeResearchText(ad.adCopy || ad.caption).slice(0, 500),
+        cta: ad.cta,
+        copy: normalizeResearchText(ad.adCopy || ad.caption).slice(0, 700),
     }));
 
-    const compactTikTok = tiktokAds.slice(0, 20).map(item => ({
+    const compactTikTok = tiktokAds.slice(0, 30).map(item => ({
         brandName: item.brandName,
-        copy: normalizeResearchText(item.adCopy).slice(0, 500),
+        copy: normalizeResearchText(item.adCopy).slice(0, 700),
         firstShown: item.firstShown || item.startDate || '',
         lastShown: item.lastShown || '',
         uniqueUsersSeen: item.uniqueUsersSeen || item.metrics?.['Unique users seen'] || '',
@@ -4823,12 +4897,12 @@ function buildAnalysisPrompt({ query, metaAds = [], tiktokAds = [], googleTrends
         source: item.source,
     }));
 
-    const compactReddit = redditPosts.slice(0, 20).map(post => ({
+    const compactReddit = redditPosts.slice(0, 30).map(post => ({
         title: post.title,
         subreddit: post.subreddit,
         score: post.score,
         comments: post.numComments,
-        text: normalizeResearchText(post.selfText).slice(0, 400),
+        text: normalizeResearchText(post.selfText).slice(0, 600),
         url: post.permalink || post.url,
     }));
 
@@ -4839,12 +4913,15 @@ function buildAnalysisPrompt({ query, metaAds = [], tiktokAds = [], googleTrends
         latestInterest: googleTrends.latestInterest,
         risingQueries: googleTrends.risingQueries,
         topQueries: googleTrends.topQueries,
-        recentTimeline: (googleTrends.timeline || []).slice(-12),
+        recentTimeline: (googleTrends.timeline || []).slice(-18),
     } : null;
 
-    return `Analyze this ads and market research dataset. Automatically distinguish the niche if the user only provided a page name or URL. Return valid JSON only with this schema:
+    return `Analyze this scraped ads and market research dataset. The analysis must be created from the data below, not from generic templates or default marketing advice.
+
+Return valid JSON only with this schema:
 {
   "detectedNiche": "string",
+  "overallSummary": "string",
   "marketSummary": "string",
   "winningAds": ["string"],
   "winningContent": ["string"],
@@ -4874,8 +4951,8 @@ function buildAnalysisPrompt({ query, metaAds = [], tiktokAds = [], googleTrends
 USER_QUERY:
 ${JSON.stringify(query, null, 2)}
 
-LOCAL_HEURISTIC_BASELINE:
-${JSON.stringify(fallbackAnalysis, null, 2)}
+COMPUTED_NUMERIC_KPIS:
+${JSON.stringify(kpis, null, 2)}
 
 META_ADS_SAMPLE:
 ${JSON.stringify(compactMeta, null, 2)}
@@ -4890,71 +4967,154 @@ REDDIT_POSTS_SAMPLE:
 ${JSON.stringify(compactReddit, null, 2)}
 
 Rules:
-- Be practical and specific.
+- Do not use canned or fixed marketing advice.
+- Only mention demographics, content types, time patterns, structural posting, winning ads, and recommendations that are supported by the scraped data.
+- If a section has weak evidence, return an empty array for that section instead of guessing.
 - Do not invent exact demographic ages unless the dataset strongly implies them.
-- If a source is empty, mention the limitation briefly.
-- KPI values should stay numeric and should not be strings.`;
+- If a source is empty, mention the limitation briefly in overallSummary or marketSummary.
+- KPI values must stay numeric.`;
 }
 
 function formatAnalysisMarkdown(analysis) {
     if (!analysis) return '';
     const lines = [];
-    lines.push(`# ${analysis.detectedNiche || 'Market'} Analysis`);
-    if (analysis.marketSummary) lines.push('', analysis.marketSummary);
+    lines.push(`# ${analysis.detectedNiche || 'Market'} Research Summary`);
+
+    const summary = analysis.overallSummary || analysis.marketSummary;
+    if (summary) lines.push('', summary);
+
+    if (analysis.marketSummary && analysis.marketSummary !== summary) {
+        lines.push('', '## Market Summary', analysis.marketSummary);
+    }
 
     const sections = [
-        ['Winning ads', analysis.winningAds],
-        ['Winning content', analysis.winningContent],
-        ['Content types', analysis.contentTypes],
-        ['Structural posting', analysis.structuralPosting],
+        ['Winning Ads', analysis.winningAds],
+        ['Winning Content', analysis.winningContent],
+        ['Content Types', analysis.contentTypes],
+        ['Structural Posting', analysis.structuralPosting],
         ['Demographics', analysis.demographics],
-        ['Time analysis', analysis.timeAnalysis],
-        ['Recommendations', analysis.recommendations],
+        ['Time Analysis', analysis.timeAnalysis],
+        ['Recommended Moves', analysis.recommendations],
     ];
 
     sections.forEach(([title, items]) => {
         if (Array.isArray(items) && items.length) {
             lines.push('', `## ${title}`);
-            items.slice(0, 8).forEach(item => lines.push(`- ${item}`));
+            items.slice(0, 12).forEach(item => lines.push(`- ${item}`));
         }
     });
 
     return lines.join('\n');
 }
 
+function formatResearchReportMarkdown({ query, marketAnalysis, metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [], warnings = [] }) {
+    const lines = [];
+    const analysisMarkdown = formatAnalysisMarkdown(marketAnalysis);
+
+    if (analysisMarkdown) {
+        lines.push(analysisMarkdown);
+    } else {
+        lines.push(`# ${query?.researchKeyword || query?.niche || 'Market'} Research Summary`);
+    }
+
+    lines.push('', '## Research Setup');
+    lines.push(`- Keyword or page: ${query?.researchKeyword || query?.niche || query?.pageUrl || 'Not specified'}`);
+    lines.push(`- Country: ${query?.country || 'Not specified'}`);
+    lines.push(`- Timeframe: ${query?.timeframe || 'Not specified'}`);
+    lines.push(`- Sources: ${Array.isArray(query?.sources) ? query.sources.join(', ') : 'Not specified'}`);
+    lines.push(`- Saved: ${new Date().toISOString()}`);
+
+    if (marketAnalysis?.kpis) {
+        lines.push('', '## KPIs');
+        Object.entries(marketAnalysis.kpis).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== '') {
+                lines.push(`- ${key}: ${value}`);
+            }
+        });
+    }
+
+    const sampleMeta = metaAds.slice(0, 10);
+    if (sampleMeta.length) {
+        lines.push('', '## Meta Ads Sample');
+        sampleMeta.forEach((ad, index) => {
+            lines.push(`- ${index + 1}. ${ad.brandName || 'Unknown'}${ad.impressionCountText || ad.impressionText ? ` | ${ad.impressionCountText || ad.impressionText}` : ''}: ${normalizeResearchText(ad.adCopy || ad.caption).slice(0, 240)}`);
+        });
+    }
+
+    const sampleTikTok = tiktokAds.slice(0, 10);
+    if (sampleTikTok.length) {
+        lines.push('', '## TikTok Ads Sample');
+        sampleTikTok.forEach((item, index) => {
+            lines.push(`- ${index + 1}. ${item.brandName || 'TikTok Advertiser'}: ${normalizeResearchText(item.adCopy).slice(0, 240)}`);
+        });
+    }
+
+    if (googleTrends) {
+        lines.push('', '## Google Trends');
+        lines.push(`- Keyword: ${googleTrends.keyword || query?.researchKeyword || ''}`);
+        lines.push(`- Average interest: ${googleTrends.averageInterest || 0}`);
+        lines.push(`- Latest interest: ${googleTrends.latestInterest || 0}`);
+        if (Array.isArray(googleTrends.risingQueries) && googleTrends.risingQueries.length) {
+            lines.push(`- Rising queries: ${googleTrends.risingQueries.slice(0, 10).join(', ')}`);
+        }
+        if (Array.isArray(googleTrends.topQueries) && googleTrends.topQueries.length) {
+            lines.push(`- Top queries: ${googleTrends.topQueries.slice(0, 10).join(', ')}`);
+        }
+    }
+
+    const sampleReddit = redditPosts.slice(0, 10);
+    if (sampleReddit.length) {
+        lines.push('', '## Reddit Discussion Sample');
+        sampleReddit.forEach((post, index) => {
+            lines.push(`- ${index + 1}. ${post.subreddit || 'Reddit'} | ${post.score || 0} score | ${post.numComments || 0} comments: ${post.title || 'Untitled'}`);
+        });
+    }
+
+    if (warnings.length) {
+        lines.push('', '## Source Warnings');
+        warnings.forEach(warning => lines.push(`- ${warning}`));
+    }
+
+    return lines.join('\n');
+}
+
 async function buildMarketAnalysis({ query, metaAds, tiktokAds, googleTrends, redditPosts, useAI }) {
-    const fallbackAnalysis = buildFallbackMarketAnalysis({ query, metaAds, tiktokAds, googleTrends, redditPosts });
+    const dataOnlyAnalysis = buildDataOnlyMarketAnalysis({ query, metaAds, tiktokAds, googleTrends, redditPosts });
 
     if (!useAI) {
-        return fallbackAnalysis;
+        return {
+            ...dataOnlyAnalysis,
+            aiProvider: 'disabled',
+            aiError: 'AI analysis is disabled. Only numeric KPIs and scraped records were returned.',
+        };
     }
 
     try {
-        const prompt = buildAnalysisPrompt({ query, metaAds, tiktokAds, googleTrends, redditPosts, fallbackAnalysis });
+        const prompt = buildAnalysisPrompt({
+            query,
+            metaAds,
+            tiktokAds,
+            googleTrends,
+            redditPosts,
+            kpis: dataOnlyAnalysis.kpis,
+        });
         const aiResult = await callConfiguredAI(prompt);
         const parsed = extractJsonObjectFromText(aiResult.text);
 
         if (!parsed) {
             return {
-                ...fallbackAnalysis,
+                ...dataOnlyAnalysis,
                 aiProvider: aiResult.provider,
-                aiError: 'AI returned text, but it was not valid JSON.',
+                aiError: 'AI returned text, but it was not valid JSON. No canned fallback analysis was inserted.',
             };
         }
 
-        return {
-            ...fallbackAnalysis,
-            ...parsed,
-            kpis: {
-                ...fallbackAnalysis.kpis,
-                ...(parsed.kpis || {}),
-            },
-            aiProvider: aiResult.provider,
-        };
+        return normalizeMarketAnalysisFromAI(parsed, dataOnlyAnalysis, aiResult.provider);
     } catch (error) {
         return {
-            ...fallbackAnalysis,
-            aiError: String(error?.message || error),
+            ...dataOnlyAnalysis,
+            aiProvider: 'unavailable',
+            aiError: `${String(error?.message || error)}. No canned fallback analysis was inserted.`,
         };
     }
 }
@@ -5099,6 +5259,17 @@ async function handleMarketResearchRequest(req, res) {
         const kpis = marketAnalysis.kpis || computeResearchKpis({ metaAds, tiktokAds, googleTrends, redditPosts });
         const detectedNiche = marketAnalysis.detectedNiche || inferNicheLocally({ niche, pageUrl, metaAds, tiktokAds, googleTrends, redditPosts });
 
+        const analysisText = formatAnalysisMarkdown(marketAnalysis);
+        const reportMarkdown = formatResearchReportMarkdown({
+            query,
+            marketAnalysis,
+            metaAds,
+            tiktokAds,
+            googleTrends,
+            redditPosts,
+            warnings,
+        });
+
         return res.json({
             success: true,
             query,
@@ -5120,7 +5291,8 @@ async function handleMarketResearchRequest(req, res) {
             googleTrends,
             kpis,
             marketAnalysis,
-            analysisText: formatAnalysisMarkdown(marketAnalysis),
+            analysisText,
+            reportMarkdown,
             warnings,
         });
     } catch (error) {
@@ -5131,6 +5303,53 @@ async function handleMarketResearchRequest(req, res) {
         });
     }
 }
+
+
+app.post('/api/market-research/save-report', async (req, res) => {
+    try {
+        const markdown = normalizeAnalysisString(req.body?.markdown || req.body?.content || req.body?.reportMarkdown);
+        if (!markdown) {
+            return res.status(400).json({
+                success: false,
+                error: 'Markdown content is required.',
+            });
+        }
+
+        const directory = normalizePlanningSubPath(req.body?.directory || req.body?.folder || '');
+        const filename = sanitizeMarkdownFilename(req.body?.filename || req.body?.name || 'market-research-report');
+        const { planningDir } = resolvePlanningPath('');
+        const targetDirectory = path.resolve(planningDir, directory);
+
+        if (!isPathInside(planningDir, targetDirectory)) {
+            return res.status(403).json({ success: false, error: 'Access denied.' });
+        }
+
+        await fs.mkdir(targetDirectory, { recursive: true });
+
+        const relativeFilePath = normalizePlanningSubPath(directory ? `${directory}/${filename}` : filename);
+        const targetFile = path.resolve(planningDir, relativeFilePath);
+
+        if (!isPathInside(planningDir, targetFile)) {
+            return res.status(403).json({ success: false, error: 'Access denied.' });
+        }
+
+        await fs.writeFile(targetFile, markdown, 'utf-8');
+
+        return res.json({
+            success: true,
+            path: relativeFilePath,
+            filename,
+            directory,
+            message: 'Market research markdown report saved to planner.',
+        });
+    } catch (error) {
+        console.error('Failed to save market research report:', error);
+        return res.status(error.status || 500).json({
+            success: false,
+            error: error.message || 'Failed to save market research report.',
+        });
+    }
+});
 
 app.post('/api/market-research', handleMarketResearchRequest);
 app.post('/api/scrape', handleMarketResearchRequest);

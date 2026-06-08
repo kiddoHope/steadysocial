@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -27,6 +27,8 @@ import {
 } from '../services/campaignService';
 
 const PlanningPage: React.FC = () => {
+  const location = useLocation();
+  const openedQueryFileRef = useRef<string | null>(null);
   const [files, setFiles] = useState<PlanningItem[]>([]);
   const [currentPath, setCurrentPath] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -482,6 +484,33 @@ const PlanningPage: React.FC = () => {
       setIsLoadingContent(false);
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const filePath = params.get('file');
+    if (!filePath || openedQueryFileRef.current === filePath) return;
+
+    const normalizedPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const parentPath = normalizedPath.includes('/')
+      ? normalizedPath.slice(0, normalizedPath.lastIndexOf('/'))
+      : '';
+
+    openedQueryFileRef.current = filePath;
+
+    if (parentPath !== currentPath) {
+      setCurrentPath(parentPath);
+    }
+
+    const fileName = normalizedPath.split('/').pop() || normalizedPath;
+    const extension = fileName.includes('.') ? fileName.split('.').pop() || 'md' : 'md';
+
+    handleSelectFile({
+      name: fileName,
+      path: normalizedPath,
+      type: 'file',
+      fileType: extension,
+    } as PlanningItem);
+  }, [location.search, currentPath]);
 
   const handleSaveEdit = async () => {
     if (!activeFile) return;

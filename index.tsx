@@ -10,6 +10,7 @@ import { AnalyticsProvider } from './contexts/AnalyticsContext';
 import { CanvasProvider } from './contexts/CanvasContext'; // Added CanvasProvider
 import { GenerationWIPProvider } from './contexts/GenerationWIPContext'; // Added GenerationWIPProvider
 import { BrowserRouter, HashRouter } from 'react-router-dom';
+import { MarketResearchProvider } from './contexts/MarketResearchContext';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -29,7 +30,9 @@ root.render(
               <GenerationWIPProvider>
                 <ChatbotProvider>
                   <AnalyticsProvider>
-                    <App />
+                    <MarketResearchProvider>
+                      <App />
+                    </MarketResearchProvider>
                   </AnalyticsProvider>
                 </ChatbotProvider>
               </GenerationWIPProvider>
