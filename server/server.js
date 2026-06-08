@@ -3517,7 +3517,7 @@ function getTikTokPeriod(timeframe) {
 }
 
 function buildGoogleTrendsUrl(keyword) {
-    return `https://trends.google.com/explore?q=${encodeURIComponent(keyword)}&date=now%201-d&geo=Worldwide`;
+    return `https://trends.google.com/trends/explore?date=now%201-d&q=${encodeURIComponent(keyword)}&hl=en-US`;
 }
 
 async function scrapeGoogleTrendsResearch({ niche, headless = true }) {
