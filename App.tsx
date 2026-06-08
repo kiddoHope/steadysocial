@@ -25,6 +25,7 @@ import ChatbotFAB from './components/chatbot/ChatbotFAB';
 import ChatWindow from './components/chatbot/ChatWindow'; 
 import { useChatbot } from './contexts/ChatbotContext'; 
 import MessengerBackgroundHub from './components/MessengerBackgroundHub';
+import ADSScraperPage from './pages/ADSScraper';
 
 // BoardPageWrapper moved outside App to fix the syntax error
 const BoardPageWrapper: React.FC = () => {
@@ -84,6 +85,7 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/dashboard" element={<Navigate to="/" replace />} />
+            <Route path="/ads-center" element={<ADSScraperPage />} />
             <Route path="/generate" element={<GenerationPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/messaging" element={<MessagingPage />} />

@@ -36,6 +36,7 @@ const Sidebar: React.FC = () => {
       </div>
       <nav className="space-y-1">
         <NavItem to="/dashboard" icon="fa-tachometer-alt" label="DASHBOARD" />
+        <NavItem to="/ads-center" icon="fa-bullhorn" label="ADS_CENTER" />
         <NavItem to="/board/default" icon="fa-th-large" label="BOARD" />
         <NavItem to="/marketing-os" icon="fa-rocket" label="MARKETING_OS" />
         <NavItem to="/crm" icon="fa-users" label="CRM" />

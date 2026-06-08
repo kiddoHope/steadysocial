@@ -18,6 +18,8 @@ public/skills
 scripts
 dist
 skills
+chromedriver
+updates
 
 # Editor directories and files
 .vscode/*

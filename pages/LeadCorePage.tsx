@@ -215,7 +215,8 @@ const LeadCorePage: React.FC = () => {
 
   const exportToExcel = async (exportLeads: Lead[], fileName: string) => {
     try {
-      const { default: XLSX } = await import('xlsx');
+      const XLSX = await import('xlsx');
+
       const dataToExport = exportLeads.map(lead => ({
         ID: lead.id,
         Name: lead.name,
@@ -232,8 +233,10 @@ const LeadCorePage: React.FC = () => {
 
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
       const workbook = XLSX.utils.book_new();
+
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads');
       XLSX.writeFile(workbook, `${fileName}.xlsx`);
+
       setSuccessMsg(`Successfully exported ${exportLeads.length} leads to ${fileName}.xlsx!`);
     } catch (err: any) {
       setError(`EXPORT_ERROR: ${err.message}`);
@@ -267,7 +270,7 @@ const LeadCorePage: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      const { default: XLSX } = await import('xlsx');
+      const XLSX = await import('xlsx');
       const data = await bulkFile.arrayBuffer();
       const workbook = XLSX.read(data);
       const sheetName = workbook.SheetNames[0];

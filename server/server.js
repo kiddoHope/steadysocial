@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import { chromium } from 'playwright';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3245,6 +3246,1895 @@ app.post('/boards/:name/rename', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+
+// --- Ads and Market Research Scraper Endpoints ---
+// These routes run inside the main local backend, so use http://localhost:3001/api/market-research.
+// Use only for data you are allowed to access and in a way that respects each platform's terms and technical controls.
+const MARKET_RESEARCH_DEFAULTS = {
+    headless: true,
+    maxItems: 50,
+    maxScrolls: 20,
+    scrollDelayMs: 700,
+    waitAfterGotoMs: 1200,
+    country: 'PH',
+    status: 'active',
+    timeframe: '30d',
+};
+
+const MARKET_SOURCE_KEYS = ['meta', 'google_trends', 'tiktok_ads', 'reddit'];
+
+function pickResearchValue(value, fallback) {
+    return value === undefined || value === null || value === '' ? fallback : value;
+}
+
+function asResearchInt(value, fallback, min, max) {
+    const n = Number.parseInt(value, 10);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+}
+
+function asResearchBool(value, fallback = false) {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') return ['true', '1', 'yes', 'on'].includes(value.toLowerCase());
+    return Boolean(value);
+}
+
+function normalizeResearchSources(value, fallbackSources = MARKET_SOURCE_KEYS) {
+    if (Array.isArray(value)) {
+        const clean = value.map(item => String(item).trim()).filter(item => MARKET_SOURCE_KEYS.includes(item));
+        return clean.length ? [...new Set(clean)] : fallbackSources;
+    }
+
+    if (value && typeof value === 'object') {
+        const clean = MARKET_SOURCE_KEYS.filter(source => value[source] === true);
+        return clean.length ? clean : fallbackSources;
+    }
+
+    return fallbackSources;
+}
+
+function normalizeResearchText(value, fallback = '') {
+    if (typeof value === 'string' && value.trim()) return value.replace(/\s+/g, ' ').trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    return fallback;
+}
+
+function parseResearchNumber(value, fallback = 0) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value !== 'string') return fallback;
+
+    const normalized = value.toLowerCase().replace(/,/g, '').trim();
+    const match = normalized.match(/[-+]?\d*\.?\d+/);
+    if (!match) return fallback;
+
+    const base = Number(match[0]);
+    if (!Number.isFinite(base)) return fallback;
+    if (normalized.includes('m')) return Math.round(base * 1000000);
+    if (normalized.includes('k')) return Math.round(base * 1000);
+    return Math.round(base);
+}
+
+function cleanAntiXssiPrefix(text) {
+    return String(text || '').replace(/^\)\]\}',?\s*/, '').trim();
+}
+
+async function fetchJsonWithPrefix(url, options = {}) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    const clean = cleanAntiXssiPrefix(text);
+    const data = clean ? JSON.parse(clean) : {};
+
+    if (!response.ok || data?.error) {
+        const message = data?.error?.message || data?.message || `HTTP ${response.status}`;
+        throw new Error(message);
+    }
+
+    return data;
+}
+
+async function getStoredAISettings() {
+    const settings = await readJsonl('settings.jsonl');
+    return settings.find(item => item.type === 'ai') || { type: 'ai', provider: 'local' };
+}
+
+function extractJsonObjectFromText(text) {
+    if (!text) return null;
+
+    const fencedMatch = String(text).match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const candidate = fencedMatch ? fencedMatch[1] : text;
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
+
+    if (start === -1 || end === -1 || end <= start) return null;
+
+    try {
+        return JSON.parse(candidate.slice(start, end + 1));
+    } catch (error) {
+        return null;
+    }
+}
+
+function getAISettingValue(aiSettings, pathCandidates = []) {
+    for (const pathCandidate of pathCandidates) {
+        const parts = pathCandidate.split('.');
+        let current = aiSettings;
+        for (const part of parts) {
+            current = current?.[part];
+        }
+        if (current !== undefined && current !== null && String(current).trim()) return current;
+    }
+    return '';
+}
+
+async function callConfiguredAI(prompt) {
+    const aiSettings = await getStoredAISettings();
+    const provider = String(aiSettings.provider || 'local').toLowerCase();
+
+    if (provider === 'gemini') {
+        const apiKey = String(getAISettingValue(aiSettings, ['cloud.apiKey', 'apiKey']) || process.env.GEMINI_API_KEY || '').trim();
+        const model = String(getAISettingValue(aiSettings, ['cloud.model', 'model']) || 'gemini-2.0-flash').trim();
+
+        if (!apiKey) throw new Error('Gemini API key is not configured in AI settings.');
+
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    generationConfig: { temperature: 0.35, responseMimeType: 'application/json' },
+                }),
+            }
+        );
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.error) {
+            throw new Error(data?.error?.message || `Gemini returned HTTP ${response.status}`);
+        }
+
+        const text = (data.candidates || [])
+            .flatMap(candidate => candidate?.content?.parts || [])
+            .map(part => part?.text || '')
+            .join('\n')
+            .trim();
+
+        return { text, provider: 'gemini', model };
+    }
+
+    if (provider === 'openai') {
+        const apiKey = String(getAISettingValue(aiSettings, ['cloud.apiKey', 'apiKey']) || process.env.OPENAI_API_KEY || '').trim();
+        const model = String(getAISettingValue(aiSettings, ['cloud.model', 'model']) || 'gpt-4o').trim();
+
+        if (!apiKey) throw new Error('OpenAI API key is not configured in AI settings.');
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                temperature: 0.35,
+                response_format: { type: 'json_object' },
+                messages: [
+                    { role: 'system', content: 'You are a precise ads and market research analyst. Return valid JSON only.' },
+                    { role: 'user', content: prompt },
+                ],
+            }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.error) {
+            throw new Error(data?.error?.message || `OpenAI returned HTTP ${response.status}`);
+        }
+
+        return {
+            text: data.choices?.[0]?.message?.content || '',
+            provider: 'openai',
+            model,
+        };
+    }
+
+    const endpoint = String(getAISettingValue(aiSettings, ['local.endpoint', 'endpoint']) || process.env.LOCAL_AI_ENDPOINT || '').trim();
+    const model = String(getAISettingValue(aiSettings, ['local.model', 'model']) || process.env.LOCAL_AI_MODEL || '').trim();
+
+    if (!endpoint) {
+        throw new Error('Local AI endpoint is not configured in AI settings.');
+    }
+
+    const normalizedEndpoint = endpoint.replace(/\/$/, '');
+    let body;
+    let targetEndpoint = endpoint;
+
+    if (normalizedEndpoint.includes('/api/generate')) {
+        body = { model, prompt, stream: false, format: 'json' };
+    } else if (normalizedEndpoint.includes('/api/chat')) {
+        body = {
+            model,
+            stream: false,
+            format: 'json',
+            messages: [{ role: 'user', content: prompt }],
+        };
+    } else {
+        targetEndpoint = normalizedEndpoint.endsWith('/chat/completions')
+            ? normalizedEndpoint
+            : `${normalizedEndpoint}/chat/completions`;
+        body = {
+            model,
+            temperature: 0.35,
+            stream: false,
+            messages: [
+                { role: 'system', content: 'You are a precise ads and market research analyst. Return valid JSON only.' },
+                { role: 'user', content: prompt },
+            ],
+        };
+    }
+
+    const response = await fetch(targetEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.error) {
+        throw new Error(data?.error?.message || data?.message || `Local AI returned HTTP ${response.status}`);
+    }
+
+    const text =
+        data.choices?.[0]?.message?.content ||
+        data.message?.content ||
+        data.response ||
+        data.content ||
+        '';
+
+    return { text, provider: 'local', model: model || 'local-model' };
+}
+
+function getTimeframeForGoogleTrends(timeframe) {
+    switch (String(timeframe || '').toLowerCase()) {
+        case '7d': return 'now 7-d';
+        case '30d': return 'today 1-m';
+        case '90d': return 'today 3-m';
+        case '12m': return 'today 12-m';
+        case '5y': return 'today 5-y';
+        default: return 'today 1-m';
+    }
+}
+
+function getTikTokPeriod(timeframe) {
+    switch (String(timeframe || '').toLowerCase()) {
+        case '7d': return 7;
+        case '90d': return 90;
+        case '12m': return 180;
+        case '5y': return 180;
+        default: return 30;
+    }
+}
+
+function buildGoogleTrendsUrl(keyword) {
+    return `https://trends.google.com/explore?q=${encodeURIComponent(keyword)}&date=now%201-d&geo=Worldwide`;
+}
+
+async function scrapeGoogleTrendsResearch({ niche, headless = true }) {
+    const keyword = normalizeResearchText(niche);
+    if (!keyword) {
+        return null;
+    }
+
+    const url = buildGoogleTrendsUrl(keyword);
+    let browser;
+
+    try {
+        browser = await chromium.launch({
+            headless,
+            args: [
+                '--disable-dev-shm-usage',
+                '--disable-quic',
+                '--ignore-certificate-errors',
+                '--ignore-certificate-errors-spki-list',
+                '--allow-running-insecure-content',
+                '--disable-features=IsolateOrigins,site-per-process',
+            ],
+        });
+
+        const context = await browser.newContext({
+            viewport: { width: 1365, height: 950 },
+            locale: 'en-US',
+            ignoreHTTPSErrors: true,
+            userAgent:
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
+        });
+
+        const page = await context.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+        // Google Trends renders the query tables client-side. Do not call any Google Trends JSON/API URL here.
+        await page.waitForSelector(
+            'div[data-section="top-searches"] table[aria-label="Top queries"], div[data-section="rising-searches"] table[aria-label="Rising queries"], table[aria-label="Top queries"], table[aria-label="Rising queries"]',
+            { timeout: 60000 }
+        ).catch(() => null);
+
+        await page.waitForTimeout(1800);
+
+        const scraped = await page.evaluate(() => {
+            const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+
+            const parseInterest = value => {
+                const text = normalize(value);
+                if (!text) return null;
+                if (/less than\s+1/i.test(text)) return 0;
+
+                const match = text.match(/[\d.,]+/);
+                if (!match) return null;
+
+                const number = Number(match[0].replace(/,/g, ''));
+                return Number.isFinite(number) ? number : null;
+            };
+
+            const parseTable = (selector, type) => {
+                const table = document.querySelector(selector);
+                if (!table) return [];
+
+                const rows = Array.from(
+                    table.querySelectorAll('tbody[jsname="cC57zf"] tr, tbody:not([aria-hidden="true"]) tr')
+                );
+
+                return rows
+                    .map(row => {
+                        const indexText = normalize(row.querySelector('td:first-child')?.textContent);
+                        const query =
+                            normalize(row.querySelector('.Z9Uqw')?.textContent) ||
+                            normalize(row.querySelector('[data-query]')?.getAttribute('data-query')) ||
+                            '';
+
+                        const interestNode = row.querySelector('.GaWfqe');
+                        const interestText =
+                            normalize(interestNode?.getAttribute('title')) ||
+                            normalize(interestNode?.getAttribute('aria-label')).replace(/^Search interest:\s*/i, '') ||
+                            '';
+
+                        const change = normalize(row.querySelector('.VYi2zf span')?.textContent);
+
+                        return {
+                            type,
+                            index: Number(indexText) || null,
+                            query,
+                            searchInterestText: interestText,
+                            searchInterest: parseInterest(interestText),
+                            change,
+                        };
+                    })
+                    .filter(item => item.query);
+            };
+
+            const topQueries = parseTable(
+                'div[data-section="top-searches"] table[aria-label="Top queries"], table[aria-label="Top queries"]',
+                'top'
+            );
+
+            const risingQueries = parseTable(
+                'div[data-section="rising-searches"] table[aria-label="Rising queries"], table[aria-label="Rising queries"]',
+                'rising'
+            );
+
+            return { topQueries, risingQueries };
+        });
+
+        const interestValues = [
+            ...scraped.topQueries,
+            ...scraped.risingQueries,
+        ]
+            .map(item => Number(item.searchInterest || 0))
+            .filter(value => Number.isFinite(value));
+
+        const averageInterest = interestValues.length
+            ? Math.round(interestValues.reduce((sum, value) => sum + value, 0) / interestValues.length)
+            : 0;
+
+        const peakInterest = interestValues.length ? Math.max(...interestValues) : 0;
+        const latestInterest = scraped.risingQueries[0]?.searchInterest || scraped.topQueries[0]?.searchInterest || 0;
+
+        return {
+            keyword,
+            url,
+            averageInterest,
+            peakInterest,
+            latestInterest,
+            timeline: [],
+            topQueries: scraped.topQueries.map(item => item.query),
+            risingQueries: scraped.risingQueries.map(item => item.query),
+            topQueryDetails: scraped.topQueries,
+            risingQueryDetails: scraped.risingQueries,
+            queryCount: scraped.topQueries.length + scraped.risingQueries.length,
+            tableSelectors: {
+                top: 'table[aria-label="Top queries"]',
+                rising: 'table[aria-label="Rising queries"]',
+            },
+        };
+    } finally {
+        if (browser) await browser.close().catch(() => {});
+    }
+}
+
+async function scrapeMetaAdsResearch({ niche, country, status, maxItems, maxScrolls, headless, scrollDelayMs, platform }) {
+    const mediaSeen = new Set();
+    let browser;
+
+    browser = await chromium.launch({
+        headless,
+        args: [
+            '--disable-dev-shm-usage',
+            '--disable-quic',
+            '--ignore-certificate-errors',
+            '--ignore-certificate-errors-spki-list',
+            '--allow-running-insecure-content',
+            '--disable-features=IsolateOrigins,site-per-process',
+        ],
+    });
+
+    try {
+        const context = await browser.newContext({
+            viewport: { width: 1365, height: 768 },
+            locale: 'en-US',
+            ignoreHTTPSErrors: true,
+            userAgent:
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
+        });
+
+        const page = await context.newPage();
+
+        page.on('response', response => {
+            const responseUrl = response.url();
+            if (/\.(mp4|webm|jpg|jpeg|png|webp)(\?|$)/i.test(responseUrl)) {
+                mediaSeen.add(responseUrl);
+            }
+        });
+
+        const targetUrl =
+            `https://www.facebook.com/ads/library/?active_status=${encodeURIComponent(status)}` +
+            `&ad_type=all&country=${encodeURIComponent(country)}` +
+            `&q=${encodeURIComponent(niche)}` +
+            '&search_type=keyword_unordered';
+
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.waitForTimeout(MARKET_RESEARCH_DEFAULTS.waitAfterGotoMs);
+        await page.waitForSelector('span:has-text("Library ID:")', { timeout: 20000 });
+
+        for (let i = 0; i < maxScrolls; i++) {
+            await page.mouse.wheel(0, 1700);
+            await page.waitForTimeout(scrollDelayMs);
+
+            const libraryCount = await page.locator('span:has-text("Library ID:")').count();
+            if (libraryCount >= maxItems) break;
+        }
+
+        const ads = await page.evaluate(({ maxAds: evaluateMaxAds, selectedPlatform }) => {
+            const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+
+            const parseImpressions = text => {
+                const normalizedText = normalize(text);
+                if (!normalizedText) return { impressionText: '', impressionValue: null };
+                if (normalizedText.includes('<')) return { impressionText: normalizedText, impressionValue: null };
+
+                const compactNumberMatch = normalizedText.toLowerCase().match(/^([\d.,]+)\s*([km])$/);
+                if (compactNumberMatch) {
+                    const numericValue = parseFloat(compactNumberMatch[1].replace(/,/g, ''));
+                    const multiplier = compactNumberMatch[2] === 'k' ? 1000 : 1000000;
+                    return {
+                        impressionText: normalizedText,
+                        impressionValue: Number.isFinite(numericValue) ? Math.round(numericValue * multiplier) : null,
+                    };
+                }
+
+                const digits = normalizedText.replace(/[^0-9]/g, '');
+                return {
+                    impressionText: normalizedText,
+                    impressionValue: digits ? parseInt(digits, 10) : null,
+                };
+            };
+
+            const mapPlatform = style => {
+                if (style.includes('-2812px')) return 'Facebook';
+                if (style.includes('-270px')) return 'Instagram';
+                if (style.includes('-710px')) return 'Messenger';
+                if (style.includes('-736px')) return 'Audience Network';
+                return 'Unknown';
+            };
+
+            const getCardRoot = librarySpan => {
+                let node = librarySpan.closest('div');
+                for (let i = 0; i < 14 && node; i++) {
+                    const hasLogo = Boolean(node.querySelector('img._8nqq.img'));
+                    const hasImpressions = /Impressions:/i.test(node.innerText || '');
+                    const hasMedia =
+                        Boolean(node.querySelector('video')) ||
+                        Boolean(node.querySelector('[data-testid="ad-content-body-video-container"]'));
+
+                    if (hasLogo && (hasImpressions || hasMedia)) return node;
+                    node = node.parentElement;
+                }
+
+                return librarySpan.closest('.xh8yej3') || librarySpan.closest('div') || document.body;
+            };
+
+            const findFirstText = (root, predicate) => {
+                const nodes = Array.from(root.querySelectorAll('span, div'));
+                const hit = nodes.find(node => predicate(normalize(node.textContent)));
+                return hit ? normalize(hit.textContent) : '';
+            };
+
+            const getPlatforms = card => {
+                const platformsLabel = Array.from(card.querySelectorAll('span')).find(
+                    span => normalize(span.textContent) === 'Platforms'
+                );
+
+                let scope = card;
+                if (platformsLabel) {
+                    const section = platformsLabel.closest('div');
+                    scope = section?.parentElement || section || card;
+                }
+
+                const icons = Array.from(scope.querySelectorAll('div[role="presentation"] .xtwfq29'));
+                const styles = icons.map(icon => normalize(icon.getAttribute('style') || ''));
+                return [...new Set(styles.map(mapPlatform))].filter(platformName => platformName !== 'Unknown');
+            };
+
+            const getStatus = card => {
+                const textStatus = findFirstText(card, text => text === 'Active' || text === 'Inactive');
+                if (textStatus) return textStatus.toUpperCase();
+
+                const blob = normalize(card.innerText || '');
+                if (blob.includes('Active')) return 'ACTIVE';
+                if (blob.includes('Inactive')) return 'INACTIVE';
+                return 'UNKNOWN';
+            };
+
+            const getStartDate = card => {
+                const startedLine = findFirstText(card, text => text.toLowerCase().startsWith('started running on'));
+                return startedLine.replace(/^Started running on\s*/i, '').trim();
+            };
+
+            const getImpressions = card => {
+                const container = Array.from(card.querySelectorAll('div, span')).find(node =>
+                    /Impressions:/i.test(normalize(node.textContent))
+                );
+                const strong = container?.querySelector('strong');
+                return parseImpressions(strong?.textContent || '');
+            };
+
+            const getBrand = card => {
+                const logoElement = card.querySelector('img._8nqq.img');
+                const brandLogo = logoElement?.getAttribute('src') || '';
+
+                const brandSpan = card.querySelector('a[href*="facebook.com/"] span') || card.querySelector('a span');
+                const brandName = normalize(brandSpan?.textContent) || 'Unknown';
+
+                const advertiserLinkElement = card.querySelector('a[href*="facebook.com/"]');
+                const advertiserUrl = advertiserLinkElement?.getAttribute('href') || '';
+
+                return { brandName, brandLogo, advertiserUrl };
+            };
+
+            const getCaption = card => {
+                const captionElement =
+                    card.querySelector('div._7jyr') ||
+                    card.querySelector('div._7jyr._a25-') ||
+                    card.querySelector('div[style*="white-space: pre-wrap"]')?.closest('div');
+
+                let caption = normalize(captionElement?.innerText || '');
+
+                if (!caption) {
+                    const mediaRoot =
+                        card.querySelector('[data-testid="ad-content-body-video-container"]') ||
+                        card.querySelector('div[data-testid*="ad-content"]') ||
+                        card;
+
+                    const candidates = Array.from(mediaRoot.querySelectorAll('div, span'))
+                        .map(node => normalize(node.textContent))
+                        .filter(text => text && text.length >= 25);
+
+                    const noise = ['Low impression count', 'Sponsored', 'Platforms', 'See ad details', 'Open Dropdown'];
+                    const filtered = candidates.filter(text => !noise.some(noiseItem => text.includes(noiseItem)));
+                    caption = filtered.sort((a, b) => b.length - a.length)[0] || '';
+                }
+
+                return caption;
+            };
+
+            const getMedia = card => {
+                const mediaRoot =
+                    card.querySelector('[data-testid="ad-content-body-video-container"]') ||
+                    card.querySelector('div[data-testid*="ad-content"]') ||
+                    card;
+
+                const video = mediaRoot.querySelector('video');
+                if (video) {
+                    const poster = video.getAttribute('poster') || '';
+                    const src = video.getAttribute('src') || video.currentSrc || '';
+                    const sources = Array.from(video.querySelectorAll('source'))
+                        .map(source => source.getAttribute('src'))
+                        .filter(Boolean);
+
+                    return { type: 'video', poster, src, sources };
+                }
+
+                const images = Array.from(mediaRoot.querySelectorAll('img'))
+                    .map(image => ({
+                        src: image.getAttribute('src') || '',
+                        alt: image.getAttribute('alt') || '',
+                        w: image.naturalWidth || 0,
+                        h: image.naturalHeight || 0,
+                    }))
+                    .filter(image => image.src);
+
+                const bigImages = images.filter(image => (image.w >= 200 && image.h >= 200) || /scontent/i.test(image.src));
+                const bestImage = bigImages[0] || images[0];
+
+                if (bestImage) return { type: 'image', src: bestImage.src, alt: bestImage.alt };
+                return { type: 'unknown' };
+            };
+
+            const platformMatchesSelection = platforms => {
+                if (!selectedPlatform || selectedPlatform === 'all') return true;
+                const wanted = selectedPlatform.replace(/_/g, ' ').toLowerCase();
+                return platforms.some(platformName => platformName.toLowerCase() === wanted);
+            };
+
+            const librarySpans = Array.from(document.querySelectorAll('span')).filter(element =>
+                normalize(element.textContent).startsWith('Library ID:')
+            );
+
+            const output = [];
+            for (const librarySpan of librarySpans) {
+                if (output.length >= evaluateMaxAds) break;
+
+                const card = getCardRoot(librarySpan);
+                if (!card) continue;
+
+                const id = normalize(librarySpan.textContent).replace('Library ID:', '').trim();
+                const { brandName, brandLogo, advertiserUrl } = getBrand(card);
+                const status = getStatus(card);
+                const startDate = getStartDate(card);
+                const { impressionText, impressionValue } = getImpressions(card);
+                const platforms = getPlatforms(card);
+                if (!platformMatchesSelection(platforms)) continue;
+
+                const caption = getCaption(card);
+                const media = getMedia(card);
+
+                output.push({
+                    id,
+                    brandName,
+                    brandLogo,
+                    advertiserUrl,
+                    status,
+                    startDate,
+                    impressionText,
+                    impressionValue,
+                    impressionCount: impressionValue || 0,
+                    impressionCountText: impressionText,
+                    platforms: platforms.length ? platforms : ['Meta'],
+                    caption,
+                    adCopy: caption,
+                    imageUrl: media?.src || media?.poster || brandLogo || '',
+                    media,
+                    source: 'Meta Ads Library',
+                });
+            }
+
+            return output;
+        }, { maxAds: maxItems, selectedPlatform: platform });
+
+        const mediaArray = Array.from(mediaSeen);
+        const mp4s = mediaArray.filter(url => /\.mp4(\?|$)/i.test(url));
+        const images = mediaArray.filter(url => /\.(jpg|jpeg|png|webp)(\?|$)/i.test(url));
+
+        const fixedAds = ads.map(ad => {
+            const media = ad.media || { type: 'unknown' };
+
+            if (media.type === 'video') {
+                const hasDirect =
+                    Boolean(media.src && media.src.length > 0) ||
+                    Boolean(Array.isArray(media.sources) && media.sources.length > 0);
+
+                if (!hasDirect && mp4s.length) {
+                    return {
+                        ...ad,
+                        media: {
+                            ...media,
+                            src: media.src || mp4s[0],
+                            sources: Array.isArray(media.sources) && media.sources.length ? media.sources : [mp4s[0]],
+                            note: 'video src filled from network fallback, not guaranteed 1:1 per card',
+                        },
+                    };
+                }
+            }
+
+            if (media.type === 'unknown' && images.length) {
+                return {
+                    ...ad,
+                    media: {
+                        type: 'image',
+                        src: images[0],
+                        alt: '',
+                        note: 'image filled from network fallback, not guaranteed 1:1 per card',
+                    },
+                    imageUrl: images[0],
+                };
+            }
+
+            return ad;
+        });
+
+        return {
+            url: targetUrl,
+            count: fixedAds.length,
+            networkMediaCount: mediaSeen.size,
+            items: fixedAds,
+        };
+    } finally {
+        if (browser) await browser.close().catch(() => {});
+    }
+}
+
+
+function normalizeUnixSeconds(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed > 9999999999 ? Math.floor(parsed / 1000) : Math.floor(parsed);
+}
+
+function getTikTokUnixRange({ timeframe, startTime, endTime }) {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const periodDays = getTikTokPeriod(timeframe);
+    const fallbackStart = nowSeconds - (periodDays * 24 * 60 * 60);
+
+    return {
+        startTime: normalizeUnixSeconds(startTime, fallbackStart),
+        endTime: normalizeUnixSeconds(endTime, nowSeconds),
+    };
+}
+
+function normalizeUnixMilliseconds(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed < 9999999999 ? Math.floor(parsed * 1000) : Math.floor(parsed);
+}
+
+function getTikTokMillisecondRange({ timeframe, startTime, endTime }) {
+    const nowMs = Date.now();
+    const periodDays = getTikTokPeriod(timeframe);
+    const fallbackStart = nowMs - (periodDays * 24 * 60 * 60 * 1000);
+
+    return {
+        startTime: normalizeUnixMilliseconds(startTime, fallbackStart),
+        endTime: normalizeUnixMilliseconds(endTime, nowMs),
+    };
+}
+
+function resolveTikTokRegion({ region, country }) {
+    return normalizeResearchText(region || country, 'all').toLowerCase() === 'all'
+        ? 'all'
+        : normalizeResearchText(region || country, 'all').toUpperCase();
+}
+
+function buildTikTokApiUrl({ niche, country, timeframe, startTime, endTime, region }) {
+    const resolvedRegion = resolveTikTokRegion({ region, country });
+    const range = getTikTokUnixRange({ timeframe, startTime, endTime });
+    const query = new URLSearchParams({
+        region: resolvedRegion,
+        type: '1',
+        start_time: String(range.startTime),
+        end_time: String(range.endTime),
+    });
+
+    if (niche) {
+        query.set('keyword', niche);
+        query.set('q', niche);
+        query.set('adv_name', niche);
+    }
+
+    return `https://library.tiktok.com/api/v1/search?${query.toString()}`;
+}
+
+function buildTikTokAdsPageUrl({ niche, country, timeframe, startTime, endTime, region }) {
+    const resolvedRegion = resolveTikTokRegion({ region, country });
+    const range = getTikTokMillisecondRange({ timeframe, startTime, endTime });
+
+    return `https://library.tiktok.com/ads?${new URLSearchParams({
+        region: resolvedRegion,
+        start_time: String(range.startTime),
+        end_time: String(range.endTime),
+        adv_name: niche || '',
+        adv_biz_ids: '',
+        query_type: '1',
+        sort_type: 'last_shown_date,desc',
+    }).toString()}`;
+}
+
+function findFirstArrayDeep(value, maxDepth = 5) {
+    if (!value || maxDepth < 0) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'object') return [];
+
+    const preferredKeys = ['materials', 'list', 'items', 'ads', 'data', 'results', 'records'];
+    for (const key of preferredKeys) {
+        if (Array.isArray(value[key])) return value[key];
+    }
+
+    for (const child of Object.values(value)) {
+        const found = findFirstArrayDeep(child, maxDepth - 1);
+        if (found.length) return found;
+    }
+
+    return [];
+}
+
+function normalizeTikTokApiItem(rawItem, index) {
+    const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
+    const metrics = item.metrics || item.stat || item.stats || item.statistics || {};
+    const advertiser = item.advertiser || item.author || item.brand || item.user || {};
+    const video = item.video || item.video_info || item.videoInfo || {};
+    const image = item.image || item.cover || item.cover_image || item.thumbnail || {};
+
+    const brandName = normalizeResearchText(
+        item.brandName || item.advertiserName || item.adv_name || item.advertiser_name || advertiser.name || item.name,
+        'TikTok Advertiser'
+    );
+
+    const adCopy = normalizeResearchText(
+        item.adCopy || item.caption || item.text || item.description || item.title || item.video_desc || item.script || item.content,
+        ''
+    );
+
+    const imageUrl = normalizeResearchText(
+        item.imageUrl || item.thumbnailUrl || item.coverUrl || item.cover_url || image.url || image.src || video.cover || video.cover_url,
+        ''
+    );
+
+    const videoUrl = normalizeResearchText(
+        item.videoUrl || item.video_url || item.play_url || item.url || video.url || video.play_url,
+        ''
+    );
+
+    return {
+        id: normalizeResearchText(item.id || item.ad_id || item.material_id || item.item_id, `tiktok-${index + 1}`),
+        brandName,
+        adCopy,
+        imageUrl,
+        videoUrl,
+        advertiserUrl: normalizeResearchText(item.advertiserUrl || item.landing_page || item.detail_url || item.url, ''),
+        metrics: {
+            Likes: parseResearchNumber(metrics.like || metrics.likes || item.like_count || item.likes, 0),
+            Shares: parseResearchNumber(metrics.share || metrics.shares || item.share_count || item.shares, 0),
+            Comments: parseResearchNumber(metrics.comment || metrics.comments || item.comment_count || item.comments, 0),
+            Impressions: parseResearchNumber(metrics.impression || metrics.impressions || item.impression_count, 0),
+            CTR: normalizeResearchText(metrics.ctr || item.ctr, ''),
+            CVR: normalizeResearchText(metrics.cvr || item.cvr, ''),
+        },
+        raw: item,
+        source: 'TikTok Ads Library API',
+    };
+}
+
+
+async function clickTikTokSeeMoreButtons(page, maxClicks = 20) {
+    let clicks = 0;
+
+    for (let i = 0; i < maxClicks; i++) {
+        const button = page.locator([
+            'button:has-text("See more")',
+            'button:has-text("Load more")',
+            'div[role="button"]:has-text("See more")',
+            'div[role="button"]:has-text("Load more")',
+            'span:has-text("See more")',
+            'span:has-text("Load more")',
+        ].join(', ')).first();
+
+        const isVisible = await button.isVisible().catch(() => false);
+        if (!isVisible) break;
+
+        await button.scrollIntoViewIfNeeded().catch(() => {});
+        await page.waitForTimeout(400);
+        const clicked = await button.click({ timeout: 5000 }).then(() => true).catch(() => false);
+        if (!clicked) break;
+
+        clicks++;
+        await page.waitForTimeout(1200);
+    }
+
+    return clicks;
+}
+
+async function scrapeTikTokAdsPageCards({
+    niche,
+    country,
+    timeframe,
+    maxItems,
+    headless,
+    maxScrolls,
+    scrollDelayMs,
+    startTime,
+    endTime,
+    region,
+}) {
+    let browser;
+    const targetUrl = buildTikTokAdsPageUrl({
+        niche,
+        country,
+        timeframe,
+        startTime,
+        endTime,
+        region,
+    });
+
+    try {
+        browser = await chromium.launch({
+            headless,
+            args: [
+                '--disable-dev-shm-usage',
+                '--disable-quic',
+                '--ignore-certificate-errors',
+                '--ignore-certificate-errors-spki-list',
+                '--allow-running-insecure-content',
+                '--disable-features=IsolateOrigins,site-per-process',
+            ],
+        });
+
+        const context = await browser.newContext({
+            viewport: { width: 1365, height: 900 },
+            locale: 'en-US',
+            ignoreHTTPSErrors: true,
+            userAgent:
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
+        });
+
+        const page = await context.newPage();
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(2500);
+        await page.waitForSelector('.ad_card', { timeout: 30000 }).catch(() => null);
+
+        let lastCardCount = 0;
+        let stagnantRounds = 0;
+        let seeMoreClickCount = 0;
+        const loopLimit = Math.max(1, Number(maxScrolls || 20));
+
+        for (let i = 0; i < loopLimit; i++) {
+            const cardCount = await page.locator('.ad_card').count();
+            if (cardCount >= maxItems) break;
+
+            seeMoreClickCount += await clickTikTokSeeMoreButtons(page, 3);
+
+            await page.mouse.wheel(0, 1800);
+            await page.waitForTimeout(scrollDelayMs || 1200);
+
+            const nextCardCount = await page.locator('.ad_card').count();
+            if (nextCardCount === lastCardCount) {
+                stagnantRounds++;
+            } else {
+                stagnantRounds = 0;
+            }
+
+            lastCardCount = nextCardCount;
+            if (stagnantRounds >= 4) break;
+        }
+
+        const items = await page.evaluate(({ maxItems }) => {
+            const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+
+            const parseRangeNumber = value => {
+                const text = normalize(value).toLowerCase();
+                if (!text) return 0;
+                const firstPart = text.split('-')[0] || text;
+                const match = firstPart.match(/[\d.]+/);
+                if (!match) return 0;
+                const number = Number(match[0]);
+                if (!Number.isFinite(number)) return 0;
+                if (text.includes('m')) return Math.round(number * 1000000);
+                if (text.includes('k')) return Math.round(number * 1000);
+                return Math.round(number);
+            };
+
+            const getBackgroundImageUrl = element => {
+                if (!element) return '';
+                const style = element.getAttribute('style') || '';
+                const match = style.match(/url\(["']?(.*?)["']?\)/i);
+                return match ? match[1].replace(/&amp;/g, '&') : '';
+            };
+
+            const cards = Array.from(document.querySelectorAll('.ad_card'));
+
+            return cards.slice(0, maxItems).map((card, index) => {
+                const link = card.querySelector('a.link');
+                const href = link?.getAttribute('href') || '';
+                const detailUrl = href ? new URL(href, 'https://library.tiktok.com').toString() : '';
+                const idMatch = href.match(/ad_id=([^&]+)/);
+                const id = idMatch ? idMatch[1] : `tiktok-card-${index + 1}`;
+
+                const brandName = normalize(card.querySelector('.ad_info_text')?.textContent) || 'TikTok Advertiser';
+                const detailRows = Array.from(card.querySelectorAll('.ad_detail li'));
+                const details = {};
+
+                detailRows.forEach(row => {
+                    const label = normalize(row.querySelector('.ad_item_description')?.textContent).replace(/:$/, '');
+                    const value = normalize(row.querySelector('.ad_item_value')?.textContent);
+                    if (label) details[label] = value;
+                });
+
+                const firstShown = details['First shown'] || '';
+                const lastShown = details['Last shown'] || '';
+                const uniqueUsersSeen = details['Unique users seen'] || '';
+                const videoPlayer = card.querySelector('.video_player');
+                const imageUrl = getBackgroundImageUrl(videoPlayer);
+
+                return {
+                    id,
+                    brandName,
+                    adCopy: '',
+                    caption: '',
+                    imageUrl,
+                    videoUrl: '',
+                    advertiserUrl: detailUrl,
+                    firstShown,
+                    lastShown,
+                    startDate: firstShown,
+                    activeTime: firstShown && lastShown ? `${firstShown} to ${lastShown}` : '',
+                    uniqueUsersSeen,
+                    metrics: {
+                        'Unique users seen': uniqueUsersSeen,
+                        Impressions: parseRangeNumber(uniqueUsersSeen),
+                    },
+                    raw: {
+                        firstShown,
+                        lastShown,
+                        uniqueUsersSeen,
+                        detailUrl,
+                    },
+                    source: 'TikTok Ads Library Page',
+                };
+            });
+        }, { maxItems });
+
+        return {
+            url: targetUrl,
+            count: items.length,
+            items,
+            seeMoreClickCount,
+        };
+    } finally {
+        if (browser) await browser.close().catch(() => {});
+    }
+}
+
+async function scrapeTikTokAdsResearch({
+    niche,
+    country,
+    timeframe,
+    maxItems,
+    headless,
+    maxScrolls,
+    scrollDelayMs,
+    startTime,
+    endTime,
+    region,
+}) {
+    const apiItems = [];
+    let apiUrl = '';
+    let apiError = '';
+
+    try {
+        apiUrl = buildTikTokApiUrl({ niche, country, timeframe, startTime, endTime, region });
+        const response = await fetch(apiUrl, {
+            headers: {
+                Accept: 'application/json,text/plain,*/*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36',
+                Referer: 'https://library.tiktok.com/ads',
+            },
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.error) {
+            throw new Error(data?.error?.message || data?.message || `TikTok Ads Library API returned HTTP ${response.status}`);
+        }
+
+        const rawItems = findFirstArrayDeep(data).slice(0, maxItems);
+        apiItems.push(...rawItems.map(normalizeTikTokApiItem));
+    } catch (error) {
+        apiError = String(error?.message || error);
+    }
+
+    let pageResult = { url: buildTikTokAdsPageUrl({ niche, country, timeframe, startTime, endTime, region }), count: 0, items: [] };
+
+    try {
+        pageResult = await scrapeTikTokAdsPageCards({
+            niche,
+            country,
+            timeframe,
+            maxItems,
+            headless,
+            maxScrolls,
+            scrollDelayMs,
+            startTime,
+            endTime,
+            region,
+        });
+    } catch (error) {
+        const pageError = String(error?.message || error);
+        if (!apiItems.length) throw new Error(pageError);
+        apiError = apiError ? `${apiError}; page scrape failed: ${pageError}` : `Page scrape failed: ${pageError}`;
+    }
+
+    const mergedMap = new Map();
+
+    [...(pageResult.items || []), ...apiItems].forEach(item => {
+        if (!item) return;
+        const key = item.id || `${item.brandName}-${item.imageUrl || item.advertiserUrl}`;
+        if (!mergedMap.has(key)) {
+            mergedMap.set(key, item);
+            return;
+        }
+
+        const existing = mergedMap.get(key);
+        mergedMap.set(key, {
+            ...existing,
+            ...item,
+            metrics: {
+                ...(existing.metrics || {}),
+                ...(item.metrics || {}),
+            },
+            raw: {
+                ...(existing.raw || {}),
+                ...(item.raw || {}),
+            },
+            firstShown: item.firstShown || existing.firstShown,
+            lastShown: item.lastShown || existing.lastShown,
+            uniqueUsersSeen: item.uniqueUsersSeen || existing.uniqueUsersSeen,
+            imageUrl: item.imageUrl || existing.imageUrl,
+            advertiserUrl: item.advertiserUrl || existing.advertiserUrl,
+        });
+    });
+
+    const items = Array.from(mergedMap.values()).slice(0, maxItems);
+
+    return {
+        url: pageResult.url,
+        apiUrl,
+        pageUrl: pageResult.url,
+        count: items.length,
+        items,
+        apiError,
+    };
+}
+
+function getRedditTimeRange(timeframe) {
+    switch (String(timeframe || '').toLowerCase()) {
+        case '1h':
+        case 'hour': return 'hour';
+        case '24h':
+        case '1d':
+        case 'day': return 'day';
+        case '7d':
+        case 'week': return 'week';
+        case '30d':
+        case 'month': return 'month';
+        case '12m':
+        case 'year': return 'year';
+        case '5y':
+        case 'all': return 'all';
+        default: return 'month';
+    }
+}
+
+function normalizeRedditPost(child, index) {
+    const post = child?.data || child || {};
+    const permalink = normalizeResearchText(post.permalink, '');
+    const title = normalizeResearchText(post.title, 'Untitled Reddit post');
+    const selfText = normalizeResearchText(post.selftext || post.selftext_html || '', '');
+
+    const decodeUrl = value => normalizeResearchText(value, '').replace(/&amp;/g, '&');
+
+    const previewImage = decodeUrl(post.preview?.images?.[0]?.source?.url || post.preview?.images?.[0]?.resolutions?.slice(-1)?.[0]?.url || '');
+    const metadataImage = (() => {
+        const metadata = post.media_metadata && typeof post.media_metadata === 'object' ? Object.values(post.media_metadata) : [];
+        for (const item of metadata) {
+            const candidate = decodeUrl(item?.s?.u || item?.p?.slice?.(-1)?.[0]?.u || item?.o?.[0]?.u || '');
+            if (candidate) return candidate;
+        }
+        return '';
+    })();
+
+    const thumbnail = decodeUrl(post.thumbnail);
+    const imageUrl = previewImage || metadataImage || (/^https?:\/\//i.test(thumbnail) ? thumbnail : '');
+    const outboundUrl = decodeUrl(post.url_overridden_by_dest || post.url || '');
+
+    return {
+        id: normalizeResearchText(post.id || post.name, `reddit-${index + 1}`),
+        fullname: normalizeResearchText(post.name, ''),
+        title,
+        subreddit: normalizeResearchText(post.subreddit_name_prefixed || (post.subreddit ? `r/${post.subreddit}` : ''), ''),
+        subredditName: normalizeResearchText(post.subreddit, ''),
+        author: normalizeResearchText(post.author, ''),
+        selfText,
+        text: selfText,
+        thumbnail: /^https?:\/\//i.test(thumbnail) ? thumbnail : '',
+        imageUrl,
+        url: outboundUrl || (permalink ? `https://www.reddit.com${permalink}` : ''),
+        permalink: permalink ? `https://www.reddit.com${permalink}` : outboundUrl,
+        createdUtc: Number(post.created_utc || 0),
+        score: Number(post.score || post.ups || 0),
+        upvoteRatio: Number(post.upvote_ratio || 0),
+        numComments: Number(post.num_comments || 0),
+        comments: Number(post.num_comments || 0),
+        subredditSubscribers: Number(post.subreddit_subscribers || 0),
+        flair: normalizeResearchText(post.link_flair_text, ''),
+        domain: normalizeResearchText(post.domain, ''),
+        isSelf: Boolean(post.is_self),
+        isVideo: Boolean(post.is_video),
+        over18: Boolean(post.over_18),
+        source: 'Reddit Search',
+        metrics: {
+            Score: Number(post.score || post.ups || 0),
+            Comments: Number(post.num_comments || 0),
+            UpvoteRatio: Number(post.upvote_ratio || 0),
+            SubredditSubscribers: Number(post.subreddit_subscribers || 0),
+        },
+        raw: post,
+    };
+}
+
+const REDDIT_USER_AGENT = process.env.REDDIT_USER_AGENT || 'node:steadysocial-market-research:v1.0.0 (by /u/steadysocial)';
+
+function buildRedditSearchUrl(keyword, limit = 100) {
+    return `https://www.reddit.com/search.json?q=${encodeURIComponent(keyword)}&limit=${Math.min(Number(limit) || 100, 100)}`;
+}
+
+function parseRedditJsonPayload(payload, maxItems = 100) {
+    const children = Array.isArray(payload?.data?.children) ? payload.data.children : [];
+    return children.slice(0, maxItems).map((child, index) => normalizeRedditPost(child, index));
+}
+
+async function fetchRedditJson(url) {
+    const response = await fetch(url, {
+        headers: {
+            Accept: 'application/json',
+            'User-Agent': REDDIT_USER_AGENT,
+        },
+    });
+
+    const text = await response.text();
+    if (!response.ok || text.trim().startsWith('<')) {
+        throw new Error(`Reddit direct fetch returned HTTP ${response.status}`);
+    }
+
+    return JSON.parse(text);
+}
+
+async function scrapeRedditResearch({ niche, maxItems, limit, headless = true }) {
+    const keyword = normalizeResearchText(niche);
+    if (!keyword) {
+        return { url: '', count: 0, items: [], posts: [], after: null, method: 'none' };
+    }
+
+    const pageLimit = Math.min(Number(limit || maxItems || 100) || 100, 100);
+    const targetUrl = buildRedditSearchUrl(keyword, pageLimit);
+
+    try {
+        const payload = await fetchRedditJson(targetUrl);
+        const posts = parseRedditJsonPayload(payload, Math.min(maxItems || pageLimit, pageLimit));
+
+        return {
+            url: targetUrl,
+            count: posts.length,
+            after: payload?.data?.after || null,
+            items: posts,
+            posts,
+            method: 'fetch',
+        };
+    } catch (fetchError) {
+        let browser;
+
+        try {
+            browser = await chromium.launch({
+                headless,
+                args: [
+                    '--disable-dev-shm-usage',
+                    '--disable-quic',
+                    '--ignore-certificate-errors',
+                    '--ignore-certificate-errors-spki-list',
+                    '--allow-running-insecure-content',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                ],
+            });
+
+            const context = await browser.newContext({
+                viewport: { width: 1365, height: 900 },
+                locale: 'en-US',
+                ignoreHTTPSErrors: true,
+                userAgent:
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
+            });
+
+            const page = await context.newPage();
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForTimeout(1200);
+
+            const text = await page.locator('body').innerText({ timeout: 30000 });
+            const payload = JSON.parse(text);
+            const posts = parseRedditJsonPayload(payload, Math.min(maxItems || pageLimit, pageLimit));
+
+            return {
+                url: targetUrl,
+                count: posts.length,
+                after: payload?.data?.after || null,
+                items: posts,
+                posts,
+                method: 'playwright',
+                fetchFallbackReason: String(fetchError?.message || fetchError),
+            };
+        } finally {
+            if (browser) await browser.close().catch(() => {});
+        }
+    }
+}
+
+function tokenFrequency(texts, limit = 8) {
+    const stopWords = new Set([
+        'the', 'and', 'for', 'with', 'that', 'this', 'your', 'you', 'our', 'are', 'from', 'have', 'has', 'not',
+        'but', 'all', 'get', 'now', 'new', 'more', 'use', 'see', 'learn', 'shop', 'buy', 'free', 'click',
+        'facebook', 'instagram', 'tiktok', 'reddit', 'ads', 'library', 'active', 'sponsored', 'running', 'started',
+    ]);
+
+    const counts = new Map();
+    texts.join(' ')
+        .toLowerCase()
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/[^a-z0-9\s-]/g, ' ')
+        .split(/\s+/)
+        .map(word => word.trim())
+        .filter(word => word.length >= 4 && !stopWords.has(word))
+        .forEach(word => counts.set(word, (counts.get(word) || 0) + 1));
+
+    return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([word]) => word);
+}
+
+function inferNicheLocally({ niche, pageUrl, metaAds, tiktokAds, googleTrends, redditPosts = [] }) {
+    const explicit = normalizeResearchText(niche);
+    if (explicit) return explicit;
+
+    const urlText = normalizeResearchText(pageUrl)
+        .replace(/^https?:\/\//i, '')
+        .replace(/www\./i, '')
+        .replace(/[/?#].*$/, '')
+        .replace(/[-_.]/g, ' ');
+
+    const copyTexts = [
+        urlText,
+        ...(metaAds || []).flatMap(ad => [ad.brandName, ad.adCopy, ad.caption]),
+        ...(tiktokAds || []).flatMap(item => [item.brandName, item.adCopy]),
+        ...(redditPosts || []).flatMap(post => [post.title, post.selfText, post.subreddit]),
+        ...((googleTrends?.topQueries || [])),
+        ...((googleTrends?.risingQueries || [])),
+    ].filter(Boolean);
+
+    const topWords = tokenFrequency(copyTexts, 4);
+    return topWords.length ? topWords.map(word => word[0].toUpperCase() + word.slice(1)).join(' ') : 'General Market';
+}
+
+function classifyContentTypes(metaAds = [], tiktokAds = [], redditPosts = []) {
+    const text = [...metaAds, ...tiktokAds, ...redditPosts]
+        .map(item => `${item.adCopy || ''} ${item.caption || ''} ${item.title || ''} ${item.selfText || ''}`.toLowerCase())
+        .join(' ');
+
+    const checks = [
+        ['Discount or promo offer', /discount|sale|off|promo|voucher|limited|deal|free shipping|bundle/],
+        ['Problem-solution hook', /problem|struggle|tired|avoid|stop|fix|solution|easy way/],
+        ['Educational content', /how to|guide|tips|learn|why|mistake|facts|science|formula/],
+        ['Social proof or testimonial', /review|trusted|customers|results|before|after|testimonial|rated/],
+        ['Urgency and scarcity', /today|now|limited time|last chance|while supplies|slots/],
+        ['Product demonstration', /demo|watch|see how|step|works|unbox|try/],
+        ['Aspirational lifestyle', /transform|confidence|glow|premium|luxury|dream|better/],
+    ];
+
+    const hits = checks.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
+    return hits.length ? hits : ['Direct product or service presentation'];
+}
+
+function analyzePostingStructure(metaAds = [], tiktokAds = [], redditPosts = []) {
+    const allItems = [...metaAds, ...tiktokAds, ...redditPosts];
+    const copyLengths = allItems.map(item => normalizeResearchText(item.adCopy || item.caption || item.title || item.selfText).length).filter(Boolean);
+    const avgCopyLength = copyLengths.length ? Math.round(copyLengths.reduce((sum, value) => sum + value, 0) / copyLengths.length) : 0;
+
+    const structures = [];
+    structures.push(avgCopyLength > 160 ? 'Long-form ad copy is common. Competitors are explaining benefits before the CTA.' : 'Short-form hooks dominate. Competitors are relying on fast claims and direct CTAs.');
+
+    const hasCta = allItems.some(item => /shop|buy|learn|sign up|get|book|message|order|download/i.test(`${item.adCopy || ''} ${item.cta || ''}`));
+    structures.push(hasCta ? 'Most winning creatives include a clear action step.' : 'CTA usage is weak. Clearer action prompts may become an advantage.');
+
+    const videoCount = metaAds.filter(ad => ad.media?.type === 'video').length + tiktokAds.filter(item => item.videoUrl).length;
+    if (videoCount > 0) structures.push(`${videoCount} video-led signal(s) detected, suggesting motion creative should be tested.`);
+
+    if (redditPosts.length) {
+        const avgComments = Math.round(redditPosts.reduce((sum, post) => sum + Number(post.numComments || 0), 0) / redditPosts.length);
+        structures.push(`Reddit discussion depth averages about ${avgComments} comment(s) per collected post, useful for pain-point mining and objection discovery.`);
+    }
+
+    return structures;
+}
+
+function analyzeDemographics({ niche, country, metaAds = [], tiktokAds = [], redditPosts = [] }) {
+    const combinedText = [niche, ...metaAds.map(ad => ad.adCopy || ad.caption || ''), ...tiktokAds.map(item => item.adCopy || ''), ...redditPosts.map(post => `${post.title || ''} ${post.selfText || ''} ${post.subreddit || ''}`)].join(' ').toLowerCase();
+    const demographics = [];
+
+    if (/mom|parent|baby|family|kids|children/.test(combinedText)) demographics.push('Likely household and family decision-makers.');
+    if (/student|school|college|review|exam|learn/.test(combinedText)) demographics.push('Likely students or skill-building audiences.');
+    if (/skin|beauty|glow|makeup|hair|perfume|fragrance/.test(combinedText)) demographics.push('Likely beauty and personal care buyers, skewing toward appearance-led purchase triggers.');
+    if (/fitness|gym|protein|weight|health|supplement/.test(combinedText)) demographics.push('Likely health, fitness, and performance-focused buyers.');
+    if (/business|saas|crm|agency|marketing|sales|lead/.test(combinedText)) demographics.push('Likely business owners, marketers, sales teams, and operators.');
+
+    demographics.push(`Geo filter is ${country}, so validate language, currency, shipping claims, and local proof for this market.`);
+    return demographics;
+}
+
+function analyzeTimeSignals(metaAds = [], googleTrends = null, timeframe = '30d') {
+    const signals = [];
+    const startDates = metaAds.map(ad => normalizeResearchText(ad.startDate)).filter(Boolean);
+
+    if (startDates.length) {
+        const recentLabel = startDates.slice(0, 5).join(', ');
+        signals.push(`Meta launch dates detected across ${startDates.length} ads. Recent visible dates include: ${recentLabel}.`);
+    } else {
+        signals.push('Meta launch timing is limited or hidden. Use active duration once available from the source.');
+    }
+
+    if (googleTrends?.timeline?.length) {
+        const latest = Number(googleTrends.latestInterest || 0);
+        const average = Number(googleTrends.averageInterest || 0);
+        const direction = latest >= average ? 'above' : 'below';
+        signals.push(`Google Trends latest interest is ${latest}, which is ${direction} the ${timeframe} average of ${average}.`);
+    }
+
+    return signals;
+}
+
+function computeResearchKpis({ metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [] }) {
+    const impressions = metaAds.map(ad => Number(ad.impressionCount || ad.impressionValue || 0)).filter(value => value > 0);
+    const totalImpressions = impressions.reduce((sum, value) => sum + value, 0);
+    const averageImpressions = impressions.length ? Math.round(totalImpressions / impressions.length) : 0;
+    const topImpressionCount = impressions.length ? Math.max(...impressions) : 0;
+    const contentTypes = classifyContentTypes(metaAds, tiktokAds, redditPosts);
+    const estimatedEngagementSignals = tiktokAds.reduce((sum, item) => {
+        const metrics = item.metrics || {};
+        return sum + ['Likes', 'Shares', 'Comments', 'Clicks', 'Impressions'].reduce((innerSum, key) => {
+            return innerSum + parseResearchNumber(metrics[key], 0);
+        }, 0);
+    }, 0);
+
+    const redditEngagementSignals = redditPosts.reduce((sum, post) => sum + Number(post.score || 0) + Number(post.numComments || 0), 0);
+
+    const trendAverageInterest = Number(googleTrends?.averageInterest || 0);
+    const trendLatestInterest = Number(googleTrends?.latestInterest || 0);
+    const trendMomentum = trendLatestInterest - trendAverageInterest;
+    const contentDiversityScore = Math.min(100, Math.round((contentTypes.length / 7) * 100));
+    const opportunityScore = Math.max(0, Math.min(100, Math.round(
+        (trendLatestInterest * 0.35) +
+        (contentDiversityScore * 0.25) +
+        (Math.min(100, metaAds.length * 3) * 0.18) +
+        (Math.min(100, tiktokAds.length * 4) * 0.17) +
+        (Math.min(100, redditPosts.length * 3) * 0.05)
+    )));
+
+    return {
+        datasetCount: metaAds.length + tiktokAds.length + redditPosts.length + (googleTrends ? 1 : 0),
+        metaAdsCount: metaAds.length,
+        tiktokContentCount: tiktokAds.length,
+        redditPostsCount: redditPosts.length,
+        totalImpressions,
+        averageImpressions,
+        topImpressionCount,
+        trendAverageInterest,
+        trendLatestInterest,
+        trendMomentum,
+        contentDiversityScore,
+        opportunityScore,
+        estimatedEngagementSignals: estimatedEngagementSignals + redditEngagementSignals,
+        redditEngagementSignals,
+    };
+}
+
+function buildFallbackMarketAnalysis({ query, metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [], aiError = '' }) {
+    const detectedNiche = inferNicheLocally({
+        niche: query.niche,
+        pageUrl: query.pageUrl,
+        metaAds,
+        tiktokAds,
+        googleTrends,
+        redditPosts,
+    });
+
+    const kpis = computeResearchKpis({ metaAds, tiktokAds, googleTrends, redditPosts });
+    const winningMeta = [...metaAds]
+        .sort((a, b) => Number(b.impressionCount || b.impressionValue || 0) - Number(a.impressionCount || a.impressionValue || 0))
+        .slice(0, 5)
+        .map(ad => `${ad.brandName || 'Unknown'}: ${ad.impressionCountText || ad.impressionText || ad.impressionCount || 'undisclosed'} impressions. ${normalizeResearchText(ad.adCopy || ad.caption).slice(0, 140)}`);
+
+    const winningTikTok = [...tiktokAds]
+        .slice(0, 5)
+        .map(item => `${item.brandName || 'TikTok Advertiser'}: ${normalizeResearchText(item.adCopy).slice(0, 160)}`);
+
+    const winningReddit = [...redditPosts]
+        .sort((a, b) => (Number(b.score || 0) + Number(b.numComments || 0)) - (Number(a.score || 0) + Number(a.numComments || 0)))
+        .slice(0, 5)
+        .map(post => `${post.subreddit || 'Reddit'}: ${post.title || 'Untitled'} (${post.score || 0} score, ${post.numComments || 0} comments)`);
+
+    const contentTypes = classifyContentTypes(metaAds, tiktokAds, redditPosts);
+    const structuralPosting = analyzePostingStructure(metaAds, tiktokAds, redditPosts);
+    const demographics = analyzeDemographics({ niche: detectedNiche, country: query.country, metaAds, tiktokAds, redditPosts });
+    const timeAnalysis = analyzeTimeSignals(metaAds, googleTrends, query.timeframe);
+
+    const recommendations = [
+        'Use the highest-impression Meta ad as the first benchmark for offer framing and opening hook.',
+        'Create at least three creative tests: one direct offer, one educational angle, and one proof-led or testimonial angle.',
+        'Match the country filter with localized language, currency, delivery promise, and social proof.',
+        'Review rising Google queries and convert them into short content topics or ad hooks.',
+        'Use high-comment Reddit threads to identify pain points, objections, competitor complaints, and phrasing customers already use.',
+    ];
+
+    return {
+        detectedNiche,
+        marketSummary: `${detectedNiche} shows ${kpis.datasetCount} collected signal group(s). The current opportunity score is ${kpis.opportunityScore}/100, based on ad volume, TikTok signals, Reddit discussion signals, Google Trends interest, and content diversity.`,
+        winningAds: winningMeta,
+        winningContent: [...winningTikTok, ...winningReddit],
+        contentTypes,
+        structuralPosting,
+        demographics,
+        timeAnalysis,
+        recommendations,
+        kpis,
+        aiProvider: 'local-fallback',
+        aiError,
+    };
+}
+
+function buildAnalysisPrompt({ query, metaAds = [], tiktokAds = [], googleTrends = null, redditPosts = [], fallbackAnalysis }) {
+    const compactMeta = metaAds.slice(0, 20).map(ad => ({
+        brandName: ad.brandName,
+        status: ad.status,
+        startDate: ad.startDate,
+        impressions: ad.impressionCount || ad.impressionValue || ad.impressionText,
+        platforms: ad.platforms,
+        copy: normalizeResearchText(ad.adCopy || ad.caption).slice(0, 500),
+    }));
+
+    const compactTikTok = tiktokAds.slice(0, 20).map(item => ({
+        brandName: item.brandName,
+        copy: normalizeResearchText(item.adCopy).slice(0, 500),
+        firstShown: item.firstShown || item.startDate || '',
+        lastShown: item.lastShown || '',
+        uniqueUsersSeen: item.uniqueUsersSeen || item.metrics?.['Unique users seen'] || '',
+        metrics: item.metrics,
+        source: item.source,
+    }));
+
+    const compactReddit = redditPosts.slice(0, 20).map(post => ({
+        title: post.title,
+        subreddit: post.subreddit,
+        score: post.score,
+        comments: post.numComments,
+        text: normalizeResearchText(post.selfText).slice(0, 400),
+        url: post.permalink || post.url,
+    }));
+
+    const compactTrends = googleTrends ? {
+        keyword: googleTrends.keyword,
+        averageInterest: googleTrends.averageInterest,
+        peakInterest: googleTrends.peakInterest,
+        latestInterest: googleTrends.latestInterest,
+        risingQueries: googleTrends.risingQueries,
+        topQueries: googleTrends.topQueries,
+        recentTimeline: (googleTrends.timeline || []).slice(-12),
+    } : null;
+
+    return `Analyze this ads and market research dataset. Automatically distinguish the niche if the user only provided a page name or URL. Return valid JSON only with this schema:
+{
+  "detectedNiche": "string",
+  "marketSummary": "string",
+  "winningAds": ["string"],
+  "winningContent": ["string"],
+  "contentTypes": ["string"],
+  "structuralPosting": ["string"],
+  "demographics": ["string"],
+  "timeAnalysis": ["string"],
+  "recommendations": ["string"],
+  "kpis": {
+    "datasetCount": number,
+    "metaAdsCount": number,
+    "tiktokContentCount": number,
+    "redditPostsCount": number,
+    "totalImpressions": number,
+    "averageImpressions": number,
+    "topImpressionCount": number,
+    "trendAverageInterest": number,
+    "trendLatestInterest": number,
+    "trendMomentum": number,
+    "contentDiversityScore": number,
+    "opportunityScore": number,
+    "estimatedEngagementSignals": number,
+    "redditEngagementSignals": number
+  }
+}
+
+USER_QUERY:
+${JSON.stringify(query, null, 2)}
+
+LOCAL_HEURISTIC_BASELINE:
+${JSON.stringify(fallbackAnalysis, null, 2)}
+
+META_ADS_SAMPLE:
+${JSON.stringify(compactMeta, null, 2)}
+
+TIKTOK_ADS_SAMPLE:
+${JSON.stringify(compactTikTok, null, 2)}
+
+GOOGLE_TRENDS:
+${JSON.stringify(compactTrends, null, 2)}
+
+REDDIT_POSTS_SAMPLE:
+${JSON.stringify(compactReddit, null, 2)}
+
+Rules:
+- Be practical and specific.
+- Do not invent exact demographic ages unless the dataset strongly implies them.
+- If a source is empty, mention the limitation briefly.
+- KPI values should stay numeric and should not be strings.`;
+}
+
+function formatAnalysisMarkdown(analysis) {
+    if (!analysis) return '';
+    const lines = [];
+    lines.push(`# ${analysis.detectedNiche || 'Market'} Analysis`);
+    if (analysis.marketSummary) lines.push('', analysis.marketSummary);
+
+    const sections = [
+        ['Winning ads', analysis.winningAds],
+        ['Winning content', analysis.winningContent],
+        ['Content types', analysis.contentTypes],
+        ['Structural posting', analysis.structuralPosting],
+        ['Demographics', analysis.demographics],
+        ['Time analysis', analysis.timeAnalysis],
+        ['Recommendations', analysis.recommendations],
+    ];
+
+    sections.forEach(([title, items]) => {
+        if (Array.isArray(items) && items.length) {
+            lines.push('', `## ${title}`);
+            items.slice(0, 8).forEach(item => lines.push(`- ${item}`));
+        }
+    });
+
+    return lines.join('\n');
+}
+
+async function buildMarketAnalysis({ query, metaAds, tiktokAds, googleTrends, redditPosts, useAI }) {
+    const fallbackAnalysis = buildFallbackMarketAnalysis({ query, metaAds, tiktokAds, googleTrends, redditPosts });
+
+    if (!useAI) {
+        return fallbackAnalysis;
+    }
+
+    try {
+        const prompt = buildAnalysisPrompt({ query, metaAds, tiktokAds, googleTrends, redditPosts, fallbackAnalysis });
+        const aiResult = await callConfiguredAI(prompt);
+        const parsed = extractJsonObjectFromText(aiResult.text);
+
+        if (!parsed) {
+            return {
+                ...fallbackAnalysis,
+                aiProvider: aiResult.provider,
+                aiError: 'AI returned text, but it was not valid JSON.',
+            };
+        }
+
+        return {
+            ...fallbackAnalysis,
+            ...parsed,
+            kpis: {
+                ...fallbackAnalysis.kpis,
+                ...(parsed.kpis || {}),
+            },
+            aiProvider: aiResult.provider,
+        };
+    } catch (error) {
+        return {
+            ...fallbackAnalysis,
+            aiError: String(error?.message || error),
+        };
+    }
+}
+
+async function handleMarketResearchRequest(req, res) {
+    const isLegacyScrapeRoute = req.path === '/api/scrape';
+    const defaultSources = isLegacyScrapeRoute ? ['meta'] : MARKET_SOURCE_KEYS;
+    const sources = normalizeResearchSources(req.body?.sources, defaultSources);
+    const niche = String(pickResearchValue(req.body?.niche, '')).trim();
+    const pageUrl = String(pickResearchValue(req.body?.pageUrl || req.body?.pageName, '')).trim();
+    const researchKeyword = niche || pageUrl;
+    const country = String(pickResearchValue(req.body?.country, MARKET_RESEARCH_DEFAULTS.country)).trim().toUpperCase();
+    const status = String(pickResearchValue(req.body?.status, MARKET_RESEARCH_DEFAULTS.status)).trim().toLowerCase();
+    const platform = String(pickResearchValue(req.body?.platform, 'all')).trim().toLowerCase();
+    const timeframe = String(pickResearchValue(req.body?.timeframe, MARKET_RESEARCH_DEFAULTS.timeframe)).trim().toLowerCase();
+    const maxItems = asResearchInt(req.body?.maxItems ?? req.body?.maxAds ?? req.body?.resultCount, MARKET_RESEARCH_DEFAULTS.maxItems, 1, 500);
+    const maxScrolls = asResearchInt(req.body?.maxScrolls, MARKET_RESEARCH_DEFAULTS.maxScrolls, 1, 60);
+    const headless = asResearchBool(req.body?.headless, MARKET_RESEARCH_DEFAULTS.headless);
+    const useAI = asResearchBool(req.body?.useAI, true);
+    const scrollDelayMs = asResearchInt(req.body?.scrollDelayMs, MARKET_RESEARCH_DEFAULTS.scrollDelayMs, 200, 5000);
+    const redditSort = String(pickResearchValue(req.body?.redditSort || req.body?.sort, 'relevance')).trim().toLowerCase();
+    const redditTime = String(pickResearchValue(req.body?.redditTime || req.body?.redditTimeRange || req.body?.t, timeframe)).trim().toLowerCase();
+    const redditLimit = asResearchInt(req.body?.redditLimit || req.body?.limit, Math.min(maxItems, 100), 1, 100);
+    const redditAfter = String(pickResearchValue(req.body?.redditAfter || req.body?.after, '')).trim();
+    const tiktokStartTime = pickResearchValue(req.body?.tiktokStartTime ?? req.body?.start_time ?? req.body?.startTime, '');
+    const tiktokEndTime = pickResearchValue(req.body?.tiktokEndTime ?? req.body?.end_time ?? req.body?.endTime, '');
+    const tiktokRegion = String(pickResearchValue(req.body?.tiktokRegion || req.body?.region, 'all')).trim();
+
+    if (!researchKeyword) {
+        return res.status(400).json({
+            success: false,
+            error: 'niche, pageName, or pageUrl is required',
+        });
+    }
+
+    const warnings = [];
+    let metaAds = [];
+    let tiktokAds = [];
+    let googleTrends = null;
+    let redditPosts = [];
+    let metaUrl = '';
+    let tiktokUrl = '';
+    let tiktokApiUrl = '';
+    let redditUrl = '';
+
+    const query = {
+        niche,
+        pageUrl,
+        researchKeyword,
+        country,
+        status,
+        platform,
+        timeframe,
+        maxItems,
+        maxScrolls,
+        headless,
+        sources,
+        useAI,
+        redditSort,
+        redditTime,
+        redditLimit,
+        tiktokRegion,
+    };
+
+    try {
+        if (sources.includes('meta')) {
+            try {
+                const metaResult = await scrapeMetaAdsResearch({
+                    niche: researchKeyword,
+                    country,
+                    status,
+                    maxItems,
+                    maxScrolls,
+                    headless,
+                    scrollDelayMs,
+                    platform,
+                });
+                metaAds = metaResult.items || [];
+                metaUrl = metaResult.url || '';
+            } catch (error) {
+                warnings.push(`Meta Ads Library scrape failed: ${String(error?.message || error)}`);
+            }
+        }
+
+        if (sources.includes('google_trends')) {
+            try {
+                googleTrends = await scrapeGoogleTrendsResearch({
+                    niche: researchKeyword,
+                    headless,
+                });
+            } catch (error) {
+                warnings.push(`Google Trends scrape failed: ${String(error?.message || error)}`);
+            }
+        }
+
+        if (sources.includes('tiktok_ads')) {
+            try {
+                const tiktokResult = await scrapeTikTokAdsResearch({
+                    niche: researchKeyword,
+                    country,
+                    timeframe,
+                    maxItems,
+                    headless,
+                    maxScrolls,
+                    scrollDelayMs,
+                    startTime: tiktokStartTime,
+                    endTime: tiktokEndTime,
+                    region: tiktokRegion,
+                });
+                tiktokAds = tiktokResult.items || [];
+                tiktokUrl = tiktokResult.url || '';
+                tiktokApiUrl = tiktokResult.apiUrl || '';
+            } catch (error) {
+                warnings.push(`TikTok Ads Library scrape failed: ${String(error?.message || error)}`);
+            }
+        }
+
+        if (sources.includes('reddit')) {
+            try {
+                const redditResult = await scrapeRedditResearch({
+                    niche: researchKeyword,
+                    maxItems,
+                    limit: redditLimit || maxItems,
+                    headless,
+                });
+                redditPosts = redditResult.posts || redditResult.items || [];
+                redditUrl = redditResult.url || '';
+            } catch (error) {
+                warnings.push(`Reddit search scrape failed: ${String(error?.message || error)}`);
+            }
+        }
+
+        const marketAnalysis = await buildMarketAnalysis({
+            query,
+            metaAds,
+            tiktokAds,
+            googleTrends,
+            redditPosts,
+            useAI,
+        });
+
+        const kpis = marketAnalysis.kpis || computeResearchKpis({ metaAds, tiktokAds, googleTrends, redditPosts });
+        const detectedNiche = marketAnalysis.detectedNiche || inferNicheLocally({ niche, pageUrl, metaAds, tiktokAds, googleTrends, redditPosts });
+
+        return res.json({
+            success: true,
+            query,
+            detectedNiche,
+            urls: {
+                metaAdsLibrary: metaUrl,
+                tiktokAdsLibrary: tiktokUrl,
+                tiktokAdsApi: tiktokApiUrl,
+                googleTrends: googleTrends?.url || '',
+                redditSearch: redditUrl,
+            },
+            count: metaAds.length,
+            totalSignalCount: metaAds.length + tiktokAds.length + redditPosts.length + (googleTrends ? 1 : 0),
+            metaAds,
+            ads: metaAds,
+            tiktokAds,
+            redditPosts,
+            redditDiscussions: redditPosts,
+            googleTrends,
+            kpis,
+            marketAnalysis,
+            analysisText: formatAnalysisMarkdown(marketAnalysis),
+            warnings,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: String(error?.message || error),
+            warnings,
+        });
+    }
+}
+
+app.post('/api/market-research', handleMarketResearchRequest);
+app.post('/api/scrape', handleMarketResearchRequest);
+
 
 // --- 404 Fallback ---
 
