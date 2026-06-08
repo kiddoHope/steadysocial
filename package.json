@@ -68,7 +68,7 @@
       "assets/**/*",
       "skills/**/*",
       "steadysocial-mcp-server/**/*",
-      "server/*"
+      "server/**/*"
     ],
     "win": {
       "target": "portable",

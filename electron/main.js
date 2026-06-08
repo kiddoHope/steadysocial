@@ -225,17 +225,17 @@ async function startBackendServer() {
         return;
     }
 
-    await new Promise((resolve, reject) => {
-        backendServer = expressApp.listen(PORT, '127.0.0.1', () => {
-            console.log(`Electron Backend running on http://127.0.0.1:${PORT}`);
-            resolve();
-        });
+    console.log('Starting packaged backend from server/server.js...');
 
-        backendServer.on('error', (error) => {
-            console.error('Failed to start Electron backend:', error);
-            reject(error);
-        });
-    });
+    process.env.PORT = String(PORT);
+    process.env.STEADYSOCIAL_USER_DATA = app.getPath('userData');
+
+    await import('../server/server.js');
+
+    const isReady = await waitForBackend(PORT);
+    if (!isReady) {
+        throw new Error(`Backend server did not start on port ${PORT}.`);
+    }
 }
 
 function createWindow() {
